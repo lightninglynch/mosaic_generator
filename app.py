@@ -1,7 +1,7 @@
 import os
 from flask import Flask, render_template, request, send_file, jsonify
 from werkzeug.utils import secure_filename
-from PIL import Image
+from PIL import Image, ImageFilter
 import pandas as pd
 import qrcode
 import base64
@@ -104,113 +104,113 @@ def generate_qr_mosaic(image_path, excel_path, num_cols, num_rows, square_tiles,
         base_height = int(height_inches * dpi)
         base_image = base_image.resize((base_width, base_height), resample=Image.LANCZOS)
     
-    # Create a temporary directory for processing
-    with tempfile.TemporaryDirectory() as temp_dir:
-        # Process the image in chunks if it's very large
-        chunk_size = 1000  # Process 1000 rows at a time
-        final_image = Image.new('RGB', (base_width + 2 * margin, base_height + 2 * margin), 'white')
-        
-        for row_start in range(0, num_rows, chunk_size):
-            row_end = min(row_start + chunk_size, num_rows)
-            
-            # Create a chunk of the final image
-            chunk_height = int((row_end - row_start) * base_height / num_rows)
-            chunk_image = Image.new('RGB', (base_width + 2 * margin, chunk_height), 'white')
-            
-            # Process this chunk
-            for row in range(row_start, row_end):
-                for col in range(num_cols):
-                    if tile_size is not None:
-                        current_tile_width = tile_size
-                        current_tile_height = tile_size
-                    else:
-                        current_tile_width = base_width // num_cols
-                        current_tile_height = base_height // num_rows
+    # Determine the tile size
+    if tile_size:
+        # Use the tile size provided by the user
+        tile_size = tile_size
+    elif square_tiles:
+        # Force square tiles using the smaller computed dimension
+        computed_tile_width = base_width // num_cols
+        computed_tile_height = base_height // num_rows
+        tile_size = min(computed_tile_width, computed_tile_height)
+    else:
+        # Default to computed (non-square) sizes if nothing is specified.
+        tile_size = None
 
-                    # Calculate crop coordinates for the current tile from the resized base image.
-                    x0 = col * current_tile_width
-                    y0 = row * current_tile_height
-                    x1 = x0 + current_tile_width
-                    y1 = y0 + current_tile_height
-                    tile_region = base_image.crop((x0, y0, x1, y1))
+    if tile_size is not None:
+        # Enforce that all tiles are square and set mosaic dimensions accordingly.
+        mosaic_width = num_cols * tile_size
+        mosaic_height = num_rows * tile_size
 
-                    # Compute the average color for tinting.
-                    avg_color = tile_region.resize((1, 1)).getpixel((0, 0))
+        # Resize the base image to exactly match the mosaic dimensions.
+        base_image = base_image.resize((mosaic_width, mosaic_height), resample=Image.LANCZOS)
+    else:
+        # If no tile_size is specified, fall back to computed dimensions.
+        mosaic_width = base_width
+        mosaic_height = base_height
+        # Compute non-square tile dimensions
+        computed_tile_width = base_width // num_cols
+        computed_tile_height = base_height // num_rows
 
-                    # Get the URL for this tile; use a fallback if needed.
-                    if row < len(df):
-                        url = df.iloc[row]["URL"]
-                    else:
-                        url = "https://example.com"
+    # Create mosaic with margin
+    final_width = mosaic_width + (2 * margin)
+    final_height = mosaic_height + (2 * margin)
+    mosaic = Image.new("RGB", (final_width, final_height), "white")
 
-                    # Generate the QR code.
-                    qr = qrcode.QRCode(
-                        version=1,
-                        error_correction=qrcode.constants.ERROR_CORRECT_H,
-                        box_size=10,
-                        border=1
-                    )
-                    qr.add_data(url)
-                    qr.make(fit=True)
+    # Create a pixelated version of the base image
+    # First, resize to a small size to create the pixelation effect
+    small_size = (num_cols, num_rows)
+    pixelated = base_image.resize(small_size, resample=Image.NEAREST)
+    # Then resize back to the original size
+    pixelated = pixelated.resize((mosaic_width, mosaic_height), resample=Image.NEAREST)
 
-                    # Create the QR code image and convert to RGBA for opacity support
-                    qr_img = qr.make_image(fill_color="black", back_color="white").convert("RGBA")
+    # Apply blur to the pixelated image
+    pixelated = pixelated.filter(ImageFilter.GaussianBlur(radius=5))
 
-                    # Calculate the size for QR code with padding
-                    padded_width = current_tile_width - (2 * qr_padding)
-                    padded_height = current_tile_height - (2 * qr_padding)
-                    
-                    # Ensure minimum size
-                    padded_width = max(padded_width, 10)
-                    padded_height = max(padded_height, 10)
+    # Apply background opacity if less than 100%
+    if bg_opacity < 100:
+        pixelated = pixelated.convert("RGBA")
+        bg_image = Image.new("RGBA", pixelated.size, (255, 255, 255, 0))
+        mask = Image.new("L", pixelated.size, int(bg_opacity * 2.55))
+        pixelated = Image.composite(pixelated, bg_image, mask)
 
-                    # Resize the QR code to the padded size
-                    qr_img = qr_img.resize((padded_width, padded_height), resample=Image.LANCZOS)
+    # Paste the pixelated background onto the mosaic
+    mosaic.paste(pixelated, (margin, margin))
 
-                    # Create a new RGBA image for the tile with padding
-                    tile_img = Image.new("RGBA", (current_tile_width, current_tile_height), (255, 255, 255, 0))
+    # Now overlay the QR codes
+    link_index = 0
+    for row in range(num_rows):
+        for col in range(num_cols):
+            if tile_size is not None:
+                current_tile_width = tile_size
+                current_tile_height = tile_size
+            else:
+                current_tile_width = computed_tile_width
+                current_tile_height = computed_tile_height
 
-                    # Calculate position to center the QR code in the tile
-                    paste_x = qr_padding
-                    paste_y = qr_padding
+            # Get the URL for this tile; use a fallback if needed.
+            if link_index < len(df):
+                url = df.iloc[link_index]["URL"]
+            else:
+                url = "https://example.com"
+            link_index += 1
 
-                    # Apply color tinting and opacity
-                    pixels = qr_img.load()
-                    width_qr, height_qr = qr_img.size
-                    for px in range(width_qr):
-                        for py in range(height_qr):
-                            r, g, b, a = pixels[px, py]
-                            if (r, g, b) == (0, 0, 0):  # Dark modules
-                                dr = int(avg_color[0] * 0.5)
-                                dg = int(avg_color[1] * 0.5)
-                                db = int(avg_color[2] * 0.5)
-                                opacity = int((qr_opacity / 100.0) * 255)
-                                pixels[px, py] = (dr, dg, db, opacity)
-                            else:  # Light modules
-                                lr = int((avg_color[0] + 255) / 2)
-                                lg = int((avg_color[1] + 255) / 2)
-                                lb = int((avg_color[2] + 255) / 2)
-                                opacity = int((qr_opacity / 100.0) * 255)
-                                pixels[px, py] = (lr, lg, lb, opacity)
+            # Generate the QR code.
+            qr = qrcode.QRCode(
+                version=1,
+                error_correction=qrcode.constants.ERROR_CORRECT_L,
+                box_size=10,
+                border=0,
+            )
+            qr.add_data(url)
+            qr.make(fit=True)
+            qr_img = qr.make_image(fill_color="black", back_color="white")
 
-                    # Paste the QR code onto the padded tile
-                    tile_img.paste(qr_img, (paste_x, paste_y))
+            # Resize QR code to fit within the tile with padding
+            qr_size = min(current_tile_width, current_tile_height) - (2 * qr_padding)
+            qr_img = qr_img.resize((qr_size, qr_size), resample=Image.LANCZOS)
 
-                    # Paste the tile onto the chunk image
-                    chunk_image.paste(tile_img, (margin + (col * current_tile_width), margin + (row * current_tile_height)))
-            
-            # Paste the chunk into the final image
-            y_offset = int(row_start * base_height / num_rows) + margin
-            final_image.paste(chunk_image, (margin, y_offset))
-            
-            # Clear memory
-            del chunk_image
-        
-        # Save the final image
-        result_path = os.path.join(app.config['UPLOAD_FOLDER'], 'result.jpg')
-        final_image.save(result_path, 'JPEG', quality=95)
-        
-        return result_path
+            # Calculate position to center the QR code in the tile
+            paste_x = margin + (col * current_tile_width) + (current_tile_width - qr_size) // 2
+            paste_y = margin + (row * current_tile_height) + (current_tile_height - qr_size) // 2
+
+            # Apply QR code opacity if less than 100%
+            if qr_opacity < 100:
+                qr_img = qr_img.convert("RGBA")
+                # Create a new image with the same size
+                qr_bg = Image.new("RGBA", qr_img.size, (255, 255, 255, 0))
+                # Create a mask with the desired opacity
+                qr_mask = Image.new("L", qr_img.size, int(qr_opacity * 2.55))
+                # Composite the QR code with the mask
+                qr_img = Image.composite(qr_img, qr_bg, qr_mask)
+
+            # Paste the QR code onto the mosaic
+            mosaic.paste(qr_img, (paste_x, paste_y), qr_img)
+
+    # Save the final image
+    result_path = os.path.join(app.config['UPLOAD_FOLDER'], 'result.jpg')
+    mosaic.save(result_path, 'JPEG', quality=95, dpi=(dpi, dpi))
+    return result_path
 
 @app.route('/', methods=['GET', 'POST'])
 def index():
