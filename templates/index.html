@@ -115,18 +115,19 @@
                             <small class="form-text text-muted">Adjust background image transparency (0-100%)</small>
                         </div>
                         
-                        <div class="form-group">
-                            <label for="margin_pixels">Margin (pixels):</label>
-                            <input type="number" class="form-control" id="margin_pixels" name="margin_pixels" value="0" min="0" step="1">
-                            <small class="form-text text-muted">Add extra white space around the final image in pixels</small>
-                        </div>
-                        
                         <div class="mb-3 form-check">
                             <input type="checkbox" class="form-check-input" id="square_tiles" name="square_tiles">
                             <label class="form-check-label" for="square_tiles">Force Square Tiles</label>
                         </div>
                         
-                        <button type="submit" class="btn btn-primary">Generate Mosaic</button>
+                        <div class="form-group">
+                            <button type="submit" class="btn btn-primary" id="generate-button">
+                                <span class="button-text">Generate Mosaic</span>
+                                <div class="spinner-border spinner-border-sm d-none" role="status">
+                                    <span class="visually-hidden">Loading...</span>
+                                </div>
+                            </button>
+                        </div>
                     </form>
                 </div>
             </div>
@@ -182,7 +183,11 @@ document.addEventListener('DOMContentLoaded', function() {
     const maxMemory = document.getElementById('max-memory');
     const memoryWarning = document.getElementById('memory-warning');
     const memoryAlert = document.getElementById('memory-alert');
+    const generateButton = document.getElementById('generate-button');
+    const buttonText = generateButton.querySelector('.button-text');
+    const buttonSpinner = generateButton.querySelector('.spinner-border');
     let previewTimeout;
+    let isPreviewLoading = false;
     
     // Add DPI conversion handling
     const dpiInput = document.getElementById('dpi');
@@ -242,6 +247,13 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
     
+    function setGenerateButtonState(isLoading) {
+        isPreviewLoading = isLoading;
+        generateButton.disabled = isLoading;
+        buttonText.textContent = isLoading ? 'Generating Preview...' : 'Generate Mosaic';
+        buttonSpinner.classList.toggle('d-none', !isLoading);
+    }
+
     function updatePreview() {
         const imageFile = form.querySelector('input[name="image"]').files[0];
         const excelFile = form.querySelector('input[name="excel"]').files[0];
@@ -251,6 +263,7 @@ document.addEventListener('DOMContentLoaded', function() {
             previewLoading.classList.add('d-none');
             previewPlaceholder.style.display = 'block';
             memoryInfo.style.display = 'none';
+            setGenerateButtonState(false);
             return;
         }
         
@@ -264,6 +277,7 @@ document.addEventListener('DOMContentLoaded', function() {
         previewPlaceholder.style.display = 'none';
         previewLoading.classList.remove('d-none');
         memoryInfo.style.display = 'none';
+        setGenerateButtonState(true);
         
         // Set a new timeout to debounce the preview update
         previewTimeout = setTimeout(() => {
@@ -279,6 +293,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     console.error('Preview error:', data.error);
                     previewLoading.classList.add('d-none');
                     previewPlaceholder.style.display = 'block';
+                    setGenerateButtonState(false);
                     return;
                 }
                 
@@ -291,19 +306,28 @@ document.addEventListener('DOMContentLoaded', function() {
                 if (data.memory_info) {
                     updateMemoryInfo(data.memory_info);
                 }
+                setGenerateButtonState(false);
             })
             .catch(error => {
                 console.error('Error updating preview:', error);
                 previewLoading.classList.add('d-none');
                 previewPlaceholder.style.display = 'block';
+                setGenerateButtonState(false);
             });
         }, 500); // 500ms debounce
     }
 
     // Add event listeners for all form inputs
     allInputs.forEach(input => {
-        if (input.type !== 'file') {
-            input.addEventListener('input', updatePreview);
+        if (input.type !== 'file' && input.id !== 'generate-button') {
+            input.addEventListener('input', () => {
+                // Only update preview if we have files
+                const imageFile = form.querySelector('input[name="image"]').files[0];
+                const excelFile = form.querySelector('input[name="excel"]').files[0];
+                if (imageFile && excelFile) {
+                    updatePreview();
+                }
+            });
         }
     });
 
@@ -314,58 +338,30 @@ document.addEventListener('DOMContentLoaded', function() {
     function handleFormSubmit(e) {
         e.preventDefault();
         
-        // Update pixel values before submission
-        updatePixelValues();
-        
-        // Get form data
-        const formData = new FormData(form);
-        
-        // Make sure files are included
-        const imageFile = form.querySelector('input[name="image"]').files[0];
-        const excelFile = form.querySelector('input[name="excel"]').files[0];
-        
-        if (!imageFile || !excelFile) {
-            alert('Please select both image and Excel files');
+        // Don't submit if preview is still loading
+        if (isPreviewLoading) {
             return;
         }
         
         // Show loading overlay
         loadingOverlay.style.display = 'block';
         
-        // Disable all inputs and buttons
-        allInputs.forEach(input => {
-            input.disabled = true;
-        });
+        const formData = new FormData(form);
         
-        // Submit the form
         fetch('/', {
             method: 'POST',
-            body: formData,
-            // Add these headers to prevent any default encoding
-            headers: {
-                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-            },
-            // Important: don't set Content-Type header, let the browser set it with the boundary
+            body: formData
         })
         .then(response => {
-            if (!response.ok) {
+            if (response.ok) {
+                window.location.reload();
+            } else {
                 throw new Error('Network response was not ok');
             }
-            return response.text();
-        })
-        .then(html => {
-            // Replace the current page content with the new HTML
-            document.open();
-            document.write(html);
-            document.close();
         })
         .catch(error => {
             console.error('Error:', error);
             loadingOverlay.style.display = 'none';
-            allInputs.forEach(input => {
-                input.disabled = false;
-            });
-            alert('An error occurred while generating the mosaic. Please try again.');
         });
     }
     
