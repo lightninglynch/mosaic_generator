@@ -287,7 +287,12 @@ document.addEventListener('DOMContentLoaded', function() {
                 method: 'POST',
                 body: formData
             })
-            .then(response => response.json())
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error('Network response was not ok');
+                }
+                return response.json();
+            })
             .then(data => {
                 if (data.error) {
                     console.error('Preview error:', data.error);
@@ -346,6 +351,9 @@ document.addEventListener('DOMContentLoaded', function() {
         // Show loading overlay
         loadingOverlay.style.display = 'block';
         
+        // Update pixel values before submission
+        updatePixelValues();
+        
         const formData = new FormData(form);
         
         fetch('/', {
@@ -354,7 +362,15 @@ document.addEventListener('DOMContentLoaded', function() {
         })
         .then(response => {
             if (response.ok) {
-                window.location.reload();
+                // Instead of reloading, show the download button
+                const successAlert = document.createElement('div');
+                successAlert.className = 'alert alert-success mt-3';
+                successAlert.innerHTML = `
+                    Mosaic generated successfully!
+                    <a href="/download" class="btn btn-primary ms-3">Download Result</a>
+                `;
+                form.parentNode.insertBefore(successAlert, form.nextSibling);
+                loadingOverlay.style.display = 'none';
             } else {
                 throw new Error('Network response was not ok');
             }
@@ -362,6 +378,7 @@ document.addEventListener('DOMContentLoaded', function() {
         .catch(error => {
             console.error('Error:', error);
             loadingOverlay.style.display = 'none';
+            alert('An error occurred while generating the mosaic. Please try again.');
         });
     }
     
