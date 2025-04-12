@@ -91,8 +91,4 @@ For production deployment, you can use the provided `Dockerfile` and `deploy.sh`
 
 ## License
 
-[Your License Here]
-
-## Contributing
-
-[Your Contribution Guidelines Here] 
+MIT
