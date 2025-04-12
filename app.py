@@ -9,6 +9,11 @@ import psutil
 import math
 import tempfile
 import shutil
+import uuid
+import schedule
+import time
+import threading
+from datetime import datetime, timedelta
 
 app = Flask(__name__)
 app.config['UPLOAD_FOLDER'] = os.getenv('UPLOAD_FOLDER', 'static/uploads')
@@ -17,8 +22,53 @@ app.config['MAX_CONTENT_LENGTH'] = int(os.getenv('MAX_CONTENT_LENGTH', 16 * 1024
 # Ensure upload folder exists
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 
+def cleanup_upload_folder():
+    """Clean up files older than 24 hours from the upload folder"""
+    try:
+        current_time = datetime.now()
+        for filename in os.listdir(app.config['UPLOAD_FOLDER']):
+            file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+            if os.path.isfile(file_path):
+                # Get file's last modification time
+                file_time = datetime.fromtimestamp(os.path.getmtime(file_path))
+                # If file is older than 24 hours, delete it
+                if current_time - file_time > timedelta(hours=24):
+                    os.remove(file_path)
+                    print(f"Deleted old file: {filename}")
+    except Exception as e:
+        print(f"Error during cleanup: {e}")
+
+def run_scheduler():
+    """Run the scheduler in a separate thread"""
+    while True:
+        schedule.run_pending()
+        time.sleep(60)  # Check every minute
+
+# Schedule the cleanup job to run daily at midnight
+schedule.every().day.at("00:00").do(cleanup_upload_folder)
+
+# Start the scheduler in a background thread
+scheduler_thread = threading.Thread(target=run_scheduler)
+scheduler_thread.daemon = True
+scheduler_thread.start()
+
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in {'png', 'jpg', 'jpeg', 'xlsx', 'xls'}
+
+def get_unique_filename(filename):
+    """Generate a unique filename using UUID"""
+    ext = filename.rsplit('.', 1)[1].lower()
+    return f"{uuid.uuid4()}.{ext}"
+
+def cleanup_old_files():
+    """Remove old files from the upload folder"""
+    try:
+        for filename in os.listdir(app.config['UPLOAD_FOLDER']):
+            file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+            if os.path.isfile(file_path):
+                os.remove(file_path)
+    except Exception as e:
+        print(f"Error cleaning up files: {e}")
 
 def estimate_image_memory(image):
     """Estimate memory usage of an image in bytes"""
@@ -237,9 +287,16 @@ def index():
         if not (allowed_file(image_file.filename) and allowed_file(excel_file.filename)):
             return render_template('index.html', error='Invalid file type')
         
+        # Clean up old files
+        cleanup_old_files()
+        
+        # Generate unique filenames
+        image_filename = get_unique_filename(image_file.filename)
+        excel_filename = get_unique_filename(excel_file.filename)
+        
         # Save uploaded files
-        image_path = os.path.join(app.config['UPLOAD_FOLDER'], secure_filename(image_file.filename))
-        excel_path = os.path.join(app.config['UPLOAD_FOLDER'], secure_filename(excel_file.filename))
+        image_path = os.path.join(app.config['UPLOAD_FOLDER'], image_filename)
+        excel_path = os.path.join(app.config['UPLOAD_FOLDER'], excel_filename)
         
         image_file.save(image_path)
         excel_file.save(excel_path)
@@ -325,9 +382,16 @@ def preview():
     if not (allowed_file(image_file.filename) and allowed_file(excel_file.filename)):
         return jsonify({'error': 'Invalid file type'}), 400
     
+    # Clean up old files
+    cleanup_old_files()
+    
+    # Generate unique filenames
+    image_filename = get_unique_filename(image_file.filename)
+    excel_filename = get_unique_filename(excel_file.filename)
+    
     # Save uploaded files
-    image_path = os.path.join(app.config['UPLOAD_FOLDER'], secure_filename(image_file.filename))
-    excel_path = os.path.join(app.config['UPLOAD_FOLDER'], secure_filename(excel_file.filename))
+    image_path = os.path.join(app.config['UPLOAD_FOLDER'], image_filename)
+    excel_path = os.path.join(app.config['UPLOAD_FOLDER'], excel_filename)
     
     image_file.save(image_path)
     excel_file.save(excel_path)
