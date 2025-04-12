@@ -25,7 +25,8 @@ User=ec2-user
 Group=nginx
 WorkingDirectory=/home/ec2-user/mosaic_generator
 Environment="PATH=/home/ec2-user/mosaic_generator/venv/bin"
-ExecStart=/home/ec2-user/mosaic_generator/venv/bin/gunicorn --workers 3 --bind unix:/run/gunicorn/mosaic-generator.sock -m 007 wsgi:app
+Environment="PYTHONUNBUFFERED=1"
+ExecStart=/home/ec2-user/mosaic_generator/venv/bin/gunicorn --workers 3 --bind unix:/run/gunicorn/mosaic-generator.sock -m 007 wsgi:app --log-level debug
 Restart=always
 
 [Install]
@@ -60,6 +61,12 @@ http {
     keepalive_timeout   65;
     types_hash_max_size 4096;
 
+    # Increase buffer sizes for large file uploads
+    client_max_body_size 300M;
+    client_body_buffer_size 128k;
+    client_header_buffer_size 1k;
+    large_client_header_buffers 4 4k;
+
     include             /etc/nginx/mime.types;
     default_type        application/octet-stream;
 
@@ -74,12 +81,24 @@ server {
     server_name _;
     root /home/ec2-user/mosaic_generator;
 
+    # Increase timeout for large file uploads
+    client_max_body_size 300M;
+    client_body_timeout 300s;
+    client_header_timeout 300s;
+    keepalive_timeout 300s;
+    send_timeout 300s;
+
     location / {
         proxy_pass http://unix:/run/gunicorn/mosaic-generator.sock;
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto \$scheme;
+        
+        # Increase proxy timeouts
+        proxy_connect_timeout 300s;
+        proxy_send_timeout 300s;
+        proxy_read_timeout 300s;
     }
 
     location /static {
@@ -94,13 +113,11 @@ server {
 }
 EOF
 
-# Create necessary directories
-mkdir -p static/uploads
-chmod 755 static/uploads
-
-# Set proper permissions
+# Create necessary directories with proper permissions
+sudo mkdir -p /home/ec2-user/mosaic_generator/static/uploads
+sudo mkdir -p /home/ec2-user/mosaic_generator/static/templates
 sudo chown -R ec2-user:nginx /home/ec2-user/mosaic_generator
-sudo chmod -R 755 /home/ec2-user/mosaic_generator
+sudo chmod -R 775 /home/ec2-user/mosaic_generator
 
 # Ensure the socket directory exists and has correct permissions
 sudo mkdir -p /run/gunicorn
@@ -132,6 +149,10 @@ sudo systemctl status nginx
 # Check socket permissions
 echo "Checking socket permissions..."
 ls -l /run/gunicorn/mosaic-generator.sock
+
+# Check directory permissions
+echo "Checking directory permissions..."
+ls -la /home/ec2-user/mosaic_generator/static
 
 # Test Nginx configuration
 echo "Testing Nginx configuration..."
