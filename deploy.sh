@@ -34,12 +34,45 @@ EOF
 
 # Remove any existing Nginx configurations
 sudo rm -f /etc/nginx/conf.d/*.conf
+sudo rm -f /etc/nginx/nginx.conf
 
-# Configure Nginx
+# Create main Nginx configuration
+sudo tee /etc/nginx/nginx.conf << EOF
+user nginx;
+worker_processes auto;
+error_log /var/log/nginx/error.log;
+pid /run/nginx.pid;
+
+events {
+    worker_connections 1024;
+}
+
+http {
+    log_format  main  '\$remote_addr - \$remote_user [\$time_local] "\$request" '
+                      '\$status \$body_bytes_sent "\$http_referer" '
+                      '"\$http_user_agent" "\$http_x_forwarded_for"';
+
+    access_log  /var/log/nginx/access.log  main;
+
+    sendfile            on;
+    tcp_nopush          on;
+    tcp_nodelay         on;
+    keepalive_timeout   65;
+    types_hash_max_size 4096;
+
+    include             /etc/nginx/mime.types;
+    default_type        application/octet-stream;
+
+    include /etc/nginx/conf.d/*.conf;
+}
+EOF
+
+# Configure application Nginx
 sudo tee /etc/nginx/conf.d/mosaic-generator.conf << EOF
 server {
-    listen 80 default_server;
-    server_name localhost;
+    listen 80;
+    server_name _;
+    root /home/ec2-user/mosaic_generator;
 
     location / {
         proxy_pass http://unix:/home/ec2-user/mosaic_generator/mosaic-generator.sock;
@@ -84,4 +117,8 @@ sudo systemctl status nginx
 
 # Check socket permissions
 echo "Checking socket permissions..."
-ls -l /home/ec2-user/mosaic_generator/mosaic-generator.sock 
+ls -l /home/ec2-user/mosaic_generator/mosaic-generator.sock
+
+# Test Nginx configuration
+echo "Testing Nginx configuration..."
+sudo nginx -t 
