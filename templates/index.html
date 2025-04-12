@@ -1,145 +1,151 @@
 {% extends "base.html" %}
 
 {% block content %}
-<div class="row">
-    <div class="col-md-8 offset-md-2">
-        <div class="card" style="position: relative;">
-            <!-- Add this loading overlay -->
-            <div id="loading-overlay" style="display: none; position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: rgba(255,255,255,0.8); z-index: 1000;">
-                <div class="d-flex justify-content-center align-items-center h-100">
-                    <div class="text-center">
-                        <div class="spinner-border text-primary mb-2" role="status">
-                            <span class="visually-hidden">Loading...</span>
+<div class="container-fluid px-4">
+    <div class="row g-4">
+        <div class="col-md-6">
+            <div class="card h-100" style="position: relative;">
+                <!-- Add this loading overlay -->
+                <div id="loading-overlay" style="display: none; position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: rgba(255,255,255,0.8); z-index: 1000;">
+                    <div class="d-flex justify-content-center align-items-center h-100">
+                        <div class="text-center">
+                            <div class="spinner-border text-primary mb-2" role="status">
+                                <span class="visually-hidden">Loading...</span>
+                            </div>
+                            <div>Generating Mosaic...</div>
                         </div>
-                        <div>Generating Mosaic...</div>
                     </div>
                 </div>
-            </div>
-            <div class="card-body">
-                <h2 class="card-title">Generate QR Mosaic</h2>
-                
-                {% if error %}
-                <div class="alert alert-danger">{{ error }}</div>
-                {% endif %}
-                
-                {% if result %}
-                <div class="alert alert-success">
-                    Mosaic generated successfully!
-                    <a href="{{ url_for('download') }}" class="btn btn-primary ms-3">Download Result</a>
-                </div>
-                {% endif %}
+                <div class="card-body">
+                    <h2 class="card-title">Generate QR Mosaic</h2>
+                    
+                    {% if error %}
+                    <div class="alert alert-danger">{{ error }}</div>
+                    {% endif %}
+                    
+                    {% if result %}
+                    <div class="alert alert-success">
+                        Mosaic generated successfully!
+                        <a href="{{ url_for('download') }}" class="btn btn-primary ms-3">Download Result</a>
+                    </div>
+                    {% endif %}
 
-                <form method="POST" enctype="multipart/form-data" id="mosaic-form">
-                    <div class="mb-3">
-                        <label for="image" class="form-label">Base Image</label>
-                        <input type="file" class="form-control" id="image" name="image" accept="image/*" required>
-                    </div>
-                    
-                    <div class="mb-3">
-                        <label for="excel" class="form-label">Excel File (with URL column)</label>
-                        <input type="file" class="form-control" id="excel" name="excel" accept=".xlsx,.xls" required>
-                    </div>
-                    
-                    <div class="row">
-                        <div class="col-md-6">
-                            <div class="mb-3">
-                                <label for="num_cols" class="form-label">Number of Columns</label>
-                                <input type="number" class="form-control" id="num_cols" name="num_cols" value="20" min="1" required>
+                    <form method="POST" enctype="multipart/form-data" id="mosaic-form">
+                        <div class="mb-3">
+                            <label for="image" class="form-label">Base Image</label>
+                            <input type="file" class="form-control" id="image" name="image" accept="image/*" required>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label for="excel" class="form-label">Excel File (with URL column)</label>
+                            <input type="file" class="form-control" id="excel" name="excel" accept=".xlsx,.xls" required>
+                        </div>
+                        
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label for="num_cols" class="form-label">Number of Columns</label>
+                                    <input type="number" class="form-control" id="num_cols" name="num_cols" value="20" min="1" required>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label for="num_rows" class="form-label">Number of Rows</label>
+                                    <input type="number" class="form-control" id="num_rows" name="num_rows" value="20" min="1" required>
+                                </div>
                             </div>
                         </div>
-                        <div class="col-md-6">
-                            <div class="mb-3">
-                                <label for="num_rows" class="form-label">Number of Rows</label>
-                                <input type="number" class="form-control" id="num_rows" name="num_rows" value="20" min="1" required>
+                        
+                        <div class="row">
+                            <div class="col-md-4">
+                                <div class="mb-3">
+                                    <label for="width_inches" class="form-label">Width (inches)</label>
+                                    <input type="number" class="form-control" id="width_inches" name="width_inches" value="0" min="0" step="0.1">
+                                    <div class="form-text">Leave as 0 to use original size</div>
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="mb-3">
+                                    <label for="height_inches" class="form-label">Height (inches)</label>
+                                    <input type="number" class="form-control" id="height_inches" name="height_inches" value="0" min="0" step="0.1">
+                                    <div class="form-text">Leave as 0 to use original size</div>
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="mb-3">
+                                    <label for="dpi" class="form-label">DPI (dots per inch)</label>
+                                    <input type="number" class="form-control" id="dpi" name="dpi" value="300" min="72" max="1200">
+                                    <div class="form-text">Print quality (300 recommended)</div>
+                                </div>
                             </div>
                         </div>
-                    </div>
-                    
-                    <div class="row">
-                        <div class="col-md-4">
-                            <div class="mb-3">
-                                <label for="width_inches" class="form-label">Width (inches)</label>
-                                <input type="number" class="form-control" id="width_inches" name="width_inches" value="0" min="0" step="0.1">
-                                <div class="form-text">Leave as 0 to use original size</div>
+                        
+                        <div class="mb-3">
+                            <label for="tile_size" class="form-label">Tile Size (inches)</label>
+                            <input type="number" class="form-control" id="tile_size" name="tile_size" min="0.1" step="0.1">
+                            <div class="form-text">Size of each QR code tile</div>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label for="margin" class="form-label">Outer Margin (inches)</label>
+                            <input type="number" class="form-control" id="margin" name="margin" value="0" min="0" step="0.1">
+                            <div class="form-text">Add extra white space around the final image</div>
+                        </div>
+                        
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label for="qr_padding" class="form-label">QR Code Padding (inches)</label>
+                                    <input type="number" class="form-control" id="qr_padding" name="qr_padding" value="0" min="0" step="0.1">
+                                    <div class="form-text">Add padding around each QR code</div>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="form-group">
+                                    <label for="qr_opacity">QR Code Opacity:</label>
+                                    <input type="range" class="form-control-range" id="qr_opacity" name="qr_opacity" min="0" max="100" value="100">
+                                    <small class="form-text text-muted">Adjust QR code transparency (0-100%)</small>
+                                </div>
                             </div>
                         </div>
-                        <div class="col-md-4">
-                            <div class="mb-3">
-                                <label for="height_inches" class="form-label">Height (inches)</label>
-                                <input type="number" class="form-control" id="height_inches" name="height_inches" value="0" min="0" step="0.1">
-                                <div class="form-text">Leave as 0 to use original size</div>
-                            </div>
+                        
+                        <div class="form-group">
+                            <label for="bg_opacity">Background Image Opacity:</label>
+                            <input type="range" class="form-control-range" id="bg_opacity" name="bg_opacity" min="0" max="100" value="100">
+                            <small class="form-text text-muted">Adjust background image transparency (0-100%)</small>
                         </div>
-                        <div class="col-md-4">
-                            <div class="mb-3">
-                                <label for="dpi" class="form-label">DPI (dots per inch)</label>
-                                <input type="number" class="form-control" id="dpi" name="dpi" value="300" min="72" max="1200">
-                                <div class="form-text">Print quality (300 recommended)</div>
-                            </div>
+                        
+                        <div class="form-group">
+                            <label for="margin_pixels">Margin (pixels):</label>
+                            <input type="number" class="form-control" id="margin_pixels" name="margin_pixels" value="0" min="0" step="1">
+                            <small class="form-text text-muted">Add extra white space around the final image in pixels</small>
                         </div>
-                    </div>
-                    
-                    <div class="mb-3">
-                        <label for="tile_size" class="form-label">Tile Size (inches)</label>
-                        <input type="number" class="form-control" id="tile_size" name="tile_size" min="0.1" step="0.1">
-                        <div class="form-text">Size of each QR code tile</div>
-                    </div>
-                    
-                    <div class="mb-3">
-                        <label for="margin" class="form-label">Outer Margin (inches)</label>
-                        <input type="number" class="form-control" id="margin" name="margin" value="0" min="0" step="0.1">
-                        <div class="form-text">Add extra white space around the final image</div>
-                    </div>
-                    
-                    <div class="row">
-                        <div class="col-md-6">
-                            <div class="mb-3">
-                                <label for="qr_padding" class="form-label">QR Code Padding (inches)</label>
-                                <input type="number" class="form-control" id="qr_padding" name="qr_padding" value="0" min="0" step="0.1">
-                                <div class="form-text">Add padding around each QR code</div>
-                            </div>
+                        
+                        <div class="mb-3 form-check">
+                            <input type="checkbox" class="form-check-input" id="square_tiles" name="square_tiles">
+                            <label class="form-check-label" for="square_tiles">Force Square Tiles</label>
                         </div>
-                        <div class="col-md-6">
-                            <div class="form-group">
-                                <label for="qr_opacity">QR Code Opacity:</label>
-                                <input type="range" class="form-control-range" id="qr_opacity" name="qr_opacity" min="0" max="100" value="100">
-                                <small class="form-text text-muted">Adjust QR code transparency (0-100%)</small>
-                            </div>
-                        </div>
-                    </div>
-                    
-                    <div class="form-group">
-                        <label for="bg_opacity">Background Image Opacity:</label>
-                        <input type="range" class="form-control-range" id="bg_opacity" name="bg_opacity" min="0" max="100" value="100">
-                        <small class="form-text text-muted">Adjust background image transparency (0-100%)</small>
-                    </div>
-                    
-                    <div class="form-group">
-                        <label for="margin_pixels">Margin (pixels):</label>
-                        <input type="number" class="form-control" id="margin_pixels" name="margin_pixels" value="0" min="0" step="1">
-                        <small class="form-text text-muted">Add extra white space around the final image in pixels</small>
-                    </div>
-                    
-                    <div class="mb-3 form-check">
-                        <input type="checkbox" class="form-check-input" id="square_tiles" name="square_tiles">
-                        <label class="form-check-label" for="square_tiles">Force Square Tiles</label>
-                    </div>
-                    
-                    <button type="submit" class="btn btn-primary">Generate Mosaic</button>
-                </form>
+                        
+                        <button type="submit" class="btn btn-primary">Generate Mosaic</button>
+                    </form>
+                </div>
             </div>
         </div>
-    </div>
-</div>
 
-<div class="row mt-4">
-    <div class="col-md-8 offset-md-2">
-        <div class="card">
-            <div class="card-body">
-                <h3 class="card-title">Live Preview</h3>
-                <div id="preview-container" class="text-center">
-                    <p class="text-muted">Upload an image and Excel file to see a preview</p>
-                    <img id="preview-image" style="max-width: 100%; display: none;">
+        <div class="col-md-6">
+            <div class="card h-100">
+                <div class="card-body">
+                    <h3 class="card-title">Live Preview</h3>
+                    <div id="preview-container" class="text-center">
+                        <p class="text-muted" id="preview-placeholder">Upload an image and Excel file to see a preview</p>
+                        <div id="preview-loading" class="d-none">
+                            <div class="spinner-border text-primary mb-2" role="status">
+                                <span class="visually-hidden">Loading...</span>
+                            </div>
+                            <div>Generating Preview...</div>
+                        </div>
+                        <img id="preview-image" style="max-width: 100%; display: none;">
+                    </div>
                 </div>
             </div>
         </div>
@@ -153,6 +159,8 @@ document.addEventListener('DOMContentLoaded', function() {
     const allInputs = form.querySelectorAll('input, button');
     const previewImage = document.getElementById('preview-image');
     const previewContainer = document.getElementById('preview-container');
+    const previewPlaceholder = document.getElementById('preview-placeholder');
+    const previewLoading = document.getElementById('preview-loading');
     let previewTimeout;
     
     // Add DPI conversion handling
@@ -194,7 +202,8 @@ document.addEventListener('DOMContentLoaded', function() {
         
         if (!imageFile || !excelFile) {
             previewImage.style.display = 'none';
-            previewContainer.querySelector('p').style.display = 'block';
+            previewLoading.classList.add('d-none');
+            previewPlaceholder.style.display = 'block';
             return;
         }
         
@@ -202,6 +211,11 @@ document.addEventListener('DOMContentLoaded', function() {
         if (previewTimeout) {
             clearTimeout(previewTimeout);
         }
+        
+        // Show loading spinner
+        previewImage.style.display = 'none';
+        previewPlaceholder.style.display = 'none';
+        previewLoading.classList.remove('d-none');
         
         // Set a new timeout to debounce the preview update
         previewTimeout = setTimeout(() => {
@@ -215,15 +229,20 @@ document.addEventListener('DOMContentLoaded', function() {
             .then(data => {
                 if (data.error) {
                     console.error('Preview error:', data.error);
+                    previewLoading.classList.add('d-none');
+                    previewPlaceholder.style.display = 'block';
                     return;
                 }
                 
                 previewImage.src = data.preview;
                 previewImage.style.display = 'block';
-                previewContainer.querySelector('p').style.display = 'none';
+                previewLoading.classList.add('d-none');
+                previewPlaceholder.style.display = 'none';
             })
             .catch(error => {
                 console.error('Error updating preview:', error);
+                previewLoading.classList.add('d-none');
+                previewPlaceholder.style.display = 'block';
             });
         }, 500); // 500ms debounce
     }
