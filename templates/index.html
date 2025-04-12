@@ -1,0 +1,231 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="row">
+    <div class="col-md-8 offset-md-2">
+        <div class="card" style="position: relative;">
+            <!-- Add this loading overlay -->
+            <div id="loading-overlay" style="display: none; position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: rgba(255,255,255,0.8); z-index: 1000;">
+                <div class="d-flex justify-content-center align-items-center h-100">
+                    <div class="text-center">
+                        <div class="spinner-border text-primary mb-2" role="status">
+                            <span class="visually-hidden">Loading...</span>
+                        </div>
+                        <div>Generating Mosaic...</div>
+                    </div>
+                </div>
+            </div>
+            <div class="card-body">
+                <h2 class="card-title">Generate QR Mosaic</h2>
+                
+                {% if error %}
+                <div class="alert alert-danger">{{ error }}</div>
+                {% endif %}
+                
+                {% if result %}
+                <div class="alert alert-success">
+                    Mosaic generated successfully!
+                    <a href="{{ url_for('download') }}" class="btn btn-primary ms-3">Download Result</a>
+                </div>
+                {% endif %}
+
+                <form method="POST" enctype="multipart/form-data" id="mosaic-form">
+                    <div class="mb-3">
+                        <label for="image" class="form-label">Base Image</label>
+                        <input type="file" class="form-control" id="image" name="image" accept="image/*" required>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="excel" class="form-label">Excel File (with URL column)</label>
+                        <input type="file" class="form-control" id="excel" name="excel" accept=".xlsx,.xls" required>
+                    </div>
+                    
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="num_cols" class="form-label">Number of Columns</label>
+                                <input type="number" class="form-control" id="num_cols" name="num_cols" value="20" min="1" required>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="num_rows" class="form-label">Number of Rows</label>
+                                <input type="number" class="form-control" id="num_rows" name="num_rows" value="20" min="1" required>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="row">
+                        <div class="col-md-4">
+                            <div class="mb-3">
+                                <label for="width_inches" class="form-label">Width (inches)</label>
+                                <input type="number" class="form-control" id="width_inches" name="width_inches" value="0" min="0" step="0.1">
+                                <div class="form-text">Leave as 0 to use original size</div>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="mb-3">
+                                <label for="height_inches" class="form-label">Height (inches)</label>
+                                <input type="number" class="form-control" id="height_inches" name="height_inches" value="0" min="0" step="0.1">
+                                <div class="form-text">Leave as 0 to use original size</div>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="mb-3">
+                                <label for="dpi" class="form-label">DPI (dots per inch)</label>
+                                <input type="number" class="form-control" id="dpi" name="dpi" value="300" min="72" max="1200">
+                                <div class="form-text">Print quality (300 recommended)</div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="tile_size" class="form-label">Tile Size (inches)</label>
+                        <input type="number" class="form-control" id="tile_size" name="tile_size" min="0.1" step="0.1">
+                        <div class="form-text">Size of each QR code tile</div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="margin" class="form-label">Outer Margin (inches)</label>
+                        <input type="number" class="form-control" id="margin" name="margin" value="0" min="0" step="0.1">
+                        <div class="form-text">Add extra white space around the final image</div>
+                    </div>
+                    
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="qr_padding" class="form-label">QR Code Padding (inches)</label>
+                                <input type="number" class="form-control" id="qr_padding" name="qr_padding" value="0" min="0" step="0.1">
+                                <div class="form-text">Add padding around each QR code</div>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="qr_opacity" class="form-label">QR Code Opacity (%)</label>
+                                <input type="number" class="form-control" id="qr_opacity" name="qr_opacity" value="100" min="0" max="100">
+                                <div class="form-text">Adjust QR code transparency (100% = fully opaque)</div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="mb-3 form-check">
+                        <input type="checkbox" class="form-check-input" id="square_tiles" name="square_tiles">
+                        <label class="form-check-label" for="square_tiles">Force Square Tiles</label>
+                    </div>
+                    
+                    <button type="submit" class="btn btn-primary">Generate Mosaic</button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const form = document.getElementById('mosaic-form');
+    const loadingOverlay = document.getElementById('loading-overlay');
+    const allInputs = form.querySelectorAll('input, button');
+    
+    // Add DPI conversion handling
+    const dpiInput = document.getElementById('dpi');
+    const inchInputs = ['tile_size', 'margin', 'qr_padding'];
+    
+    function inchesToPixels(inches, dpi) {
+        return inches * dpi;
+    }
+    
+    // Create hidden pixel inputs
+    inchInputs.forEach(inputId => {
+        const inchInput = document.getElementById(inputId);
+        const pixelInput = document.createElement('input');
+        pixelInput.type = 'hidden';
+        pixelInput.name = inputId + '_pixels';
+        inchInput.parentNode.appendChild(pixelInput);
+    });
+    
+    function updatePixelValues() {
+        const dpi = parseInt(dpiInput.value) || 300;
+        inchInputs.forEach(inputId => {
+            const inchInput = document.getElementById(inputId);
+            const pixelInput = document.querySelector(`input[name="${inputId}_pixels"]`);
+            const inchValue = parseFloat(inchInput.value) || 0;
+            const pixelValue = Math.round(inchesToPixels(inchValue, dpi));
+            pixelInput.value = pixelValue;
+        });
+    }
+    
+    dpiInput.addEventListener('input', updatePixelValues);
+    inchInputs.forEach(inputId => {
+        document.getElementById(inputId).addEventListener('input', updatePixelValues);
+    });
+    
+    function handleFormSubmit(e) {
+        e.preventDefault();
+        
+        // Update pixel values before submission
+        updatePixelValues();
+        
+        // Get form data
+        const formData = new FormData(form);
+        
+        // Make sure files are included
+        const imageFile = form.querySelector('input[name="image"]').files[0];
+        const excelFile = form.querySelector('input[name="excel"]').files[0];
+        
+        if (!imageFile || !excelFile) {
+            alert('Please select both image and Excel files');
+            return;
+        }
+        
+        // Show loading overlay
+        loadingOverlay.style.display = 'block';
+        
+        // Disable all inputs and buttons
+        allInputs.forEach(input => {
+            input.disabled = true;
+        });
+        
+        // Submit the form
+        fetch('/', {
+            method: 'POST',
+            body: formData,
+            // Add these headers to prevent any default encoding
+            headers: {
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+            },
+            // Important: don't set Content-Type header, let the browser set it with the boundary
+        })
+        .then(response => {
+            if (!response.ok) {
+                throw new Error('Network response was not ok');
+            }
+            return response.text();
+        })
+        .then(html => {
+            // Replace the current page content with the new HTML
+            document.open();
+            document.write(html);
+            document.close();
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            loadingOverlay.style.display = 'none';
+            allInputs.forEach(input => {
+                input.disabled = false;
+            });
+            alert('An error occurred while generating the mosaic. Please try again.');
+        });
+    }
+    
+    function initializeForm() {
+        const form = document.getElementById('mosaic-form');
+        if (form) {
+            form.addEventListener('submit', handleFormSubmit);
+        }
+    }
+    
+    // Initialize the form
+    initializeForm();
+});
+</script>
+{% endblock %} 
