@@ -25,7 +25,7 @@ User=ec2-user
 Group=nginx
 WorkingDirectory=/home/ec2-user/mosaic_generator
 Environment="PATH=/home/ec2-user/mosaic_generator/venv/bin"
-ExecStart=/home/ec2-user/mosaic_generator/venv/bin/gunicorn --workers 3 --bind unix:/home/ec2-user/mosaic_generator/mosaic-generator.sock -m 007 wsgi:app
+ExecStart=/home/ec2-user/mosaic_generator/venv/bin/gunicorn --workers 3 --bind unix:/run/gunicorn/mosaic-generator.sock -m 007 wsgi:app
 Restart=always
 
 [Install]
@@ -40,7 +40,7 @@ sudo rm -f /etc/nginx/nginx.conf
 sudo tee /etc/nginx/nginx.conf << EOF
 user nginx;
 worker_processes auto;
-error_log /var/log/nginx/error.log;
+error_log /var/log/nginx/error.log debug;
 pid /run/nginx.pid;
 
 events {
@@ -75,7 +75,7 @@ server {
     root /home/ec2-user/mosaic_generator;
 
     location / {
-        proxy_pass http://unix:/home/ec2-user/mosaic_generator/mosaic-generator.sock;
+        proxy_pass http://unix:/run/gunicorn/mosaic-generator.sock;
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
@@ -84,6 +84,12 @@ server {
 
     location /static {
         alias /home/ec2-user/mosaic_generator/static;
+    }
+
+    # Error pages
+    error_page 500 502 503 504 /50x.html;
+    location = /50x.html {
+        root /usr/share/nginx/html;
     }
 }
 EOF
@@ -101,6 +107,14 @@ sudo mkdir -p /run/gunicorn
 sudo chown ec2-user:nginx /run/gunicorn
 sudo chmod 775 /run/gunicorn
 
+# Remove any existing socket file
+sudo rm -f /run/gunicorn/mosaic-generator.sock
+sudo rm -f /home/ec2-user/mosaic_generator/mosaic-generator.sock
+
+# Add nginx user to ec2-user group
+sudo usermod -a -G nginx ec2-user
+sudo usermod -a -G ec2-user nginx
+
 # Reload systemd to pick up new service file
 sudo systemctl daemon-reload
 
@@ -117,7 +131,7 @@ sudo systemctl status nginx
 
 # Check socket permissions
 echo "Checking socket permissions..."
-ls -l /home/ec2-user/mosaic_generator/mosaic-generator.sock
+ls -l /run/gunicorn/mosaic-generator.sock
 
 # Test Nginx configuration
 echo "Testing Nginx configuration..."
