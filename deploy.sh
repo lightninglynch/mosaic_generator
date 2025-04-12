@@ -31,11 +31,14 @@ ExecStart=/home/ec2-user/mosaic_generator/venv/bin/gunicorn --workers 3 --bind u
 WantedBy=multi-user.target
 EOF
 
+# Remove any existing Nginx configurations
+sudo rm -f /etc/nginx/conf.d/*.conf
+
 # Configure Nginx
 sudo tee /etc/nginx/conf.d/mosaic-generator.conf << EOF
 server {
-    listen 80;
-    server_name _;
+    listen 80 default_server;
+    server_name localhost;
 
     location / {
         proxy_pass http://unix:/home/ec2-user/mosaic_generator/mosaic-generator.sock;
@@ -49,9 +52,6 @@ server {
 }
 EOF
 
-# Remove default Nginx configuration
-sudo rm -f /etc/nginx/conf.d/default.conf
-
 # Create necessary directories
 mkdir -p static/uploads
 chmod 755 static/uploads
@@ -63,5 +63,5 @@ sudo chmod -R 755 /home/ec2-user/mosaic_generator
 # Start and enable services
 sudo systemctl start mosaic-generator
 sudo systemctl enable mosaic-generator
-sudo systemctl start nginx
+sudo systemctl restart nginx
 sudo systemctl enable nginx 
