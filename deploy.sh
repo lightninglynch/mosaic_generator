@@ -25,7 +25,8 @@ User=ec2-user
 Group=nginx
 WorkingDirectory=/home/ec2-user/mosaic_generator
 Environment="PATH=/home/ec2-user/mosaic_generator/venv/bin"
-ExecStart=/home/ec2-user/mosaic_generator/venv/bin/gunicorn --workers 3 --bind unix:mosaic-generator.sock -m 007 wsgi:app
+ExecStart=/home/ec2-user/mosaic_generator/venv/bin/gunicorn --workers 3 --bind unix:/home/ec2-user/mosaic_generator/mosaic-generator.sock -m 007 wsgi:app
+Restart=always
 
 [Install]
 WantedBy=multi-user.target
@@ -44,6 +45,8 @@ server {
         proxy_pass http://unix:/home/ec2-user/mosaic_generator/mosaic-generator.sock;
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
     }
 
     location /static {
@@ -60,8 +63,25 @@ chmod 755 static/uploads
 sudo chown -R ec2-user:nginx /home/ec2-user/mosaic_generator
 sudo chmod -R 755 /home/ec2-user/mosaic_generator
 
+# Ensure the socket directory exists and has correct permissions
+sudo mkdir -p /run/gunicorn
+sudo chown ec2-user:nginx /run/gunicorn
+sudo chmod 775 /run/gunicorn
+
+# Reload systemd to pick up new service file
+sudo systemctl daemon-reload
+
 # Start and enable services
-sudo systemctl start mosaic-generator
+sudo systemctl restart mosaic-generator
 sudo systemctl enable mosaic-generator
 sudo systemctl restart nginx
-sudo systemctl enable nginx 
+sudo systemctl enable nginx
+
+# Check service status
+echo "Checking service status..."
+sudo systemctl status mosaic-generator
+sudo systemctl status nginx
+
+# Check socket permissions
+echo "Checking socket permissions..."
+ls -l /home/ec2-user/mosaic_generator/mosaic-generator.sock 
