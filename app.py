@@ -1,9 +1,10 @@
 import os
-from flask import Flask, render_template, request, send_file
+from flask import Flask, render_template, request, send_file, jsonify
 from werkzeug.utils import secure_filename
 from PIL import Image
 import pandas as pd
 import qrcode
+import base64
 
 app = Flask(__name__)
 app.config['UPLOAD_FOLDER'] = os.getenv('UPLOAD_FOLDER', 'static/uploads')
@@ -16,13 +17,27 @@ def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in {'png', 'jpg', 'jpeg', 'xlsx', 'xls'}
 
 def generate_qr_mosaic(image_path, excel_path, num_cols, num_rows, square_tiles, tile_size, 
-                      margin=0, qr_padding=0, qr_opacity=100, width_inches=0, height_inches=0, dpi=300):
+                      margin=0, qr_padding=0, qr_opacity=100, width_inches=0, height_inches=0, dpi=300, bg_opacity=100, preview=False):
     # Load Excel data
     df = pd.read_excel(excel_path)
     
     # Load the base image
     base_image = Image.open(image_path)
     base_width, base_height = base_image.size
+
+    # If in preview mode, resize the base image to a smaller size
+    if preview:
+        preview_size = 500  # Maximum dimension for preview
+        if base_width > base_height:
+            new_width = preview_size
+            new_height = int(base_height * (preview_size / base_width))
+        else:
+            new_height = preview_size
+            new_width = int(base_width * (preview_size / base_height))
+        base_image = base_image.resize((new_width, new_height), resample=Image.LANCZOS)
+        base_width, base_height = base_image.size
+        # Adjust DPI for preview
+        dpi = 72  # Lower DPI for preview
 
     # If inches are specified, convert to pixels using DPI
     if width_inches > 0 and height_inches > 0:
@@ -65,6 +80,17 @@ def generate_qr_mosaic(image_path, excel_path, num_cols, num_rows, square_tiles,
     final_width = mosaic_width + (2 * margin)
     final_height = mosaic_height + (2 * margin)
     mosaic = Image.new("RGB", (final_width, final_height), "white")
+
+    # Apply background opacity if less than 100%
+    if bg_opacity < 100:
+        # Convert base image to RGBA
+        base_image = base_image.convert("RGBA")
+        # Create a new image with the same size
+        bg_image = Image.new("RGBA", base_image.size, (255, 255, 255, 0))
+        # Create a mask with the desired opacity
+        mask = Image.new("L", base_image.size, int(bg_opacity * 2.55))
+        # Composite the base image with the mask
+        base_image = Image.composite(base_image, bg_image, mask)
 
     link_index = 0
     for row in range(num_rows):
@@ -211,6 +237,11 @@ def index():
             qr_opacity = int(qr_opacity) if qr_opacity.isdigit() else 100
             qr_opacity = max(0, min(100, qr_opacity))  # Clamp between 0 and 100
             
+            # Get background opacity parameter
+            bg_opacity = request.form.get('bg_opacity', '100')
+            bg_opacity = int(bg_opacity) if bg_opacity.isdigit() else 100
+            bg_opacity = max(0, min(100, bg_opacity))  # Clamp between 0 and 100
+            
             # Get size parameters
             width_inches = request.form.get('width_inches', '0')
             width_inches = float(width_inches) if width_inches else 0
@@ -234,7 +265,8 @@ def index():
                 qr_opacity,
                 width_inches,
                 height_inches,
-                dpi
+                dpi,
+                bg_opacity
             )
             return render_template('index.html', result=True)
         except Exception as e:
@@ -251,6 +283,84 @@ def download():
 @app.route('/health')
 def health_check():
     return {'status': 'healthy'}, 200
+
+@app.route('/preview', methods=['POST'])
+def preview():
+    if 'image' not in request.files or 'excel' not in request.files:
+        return jsonify({'error': 'Missing files'}), 400
+    
+    image_file = request.files['image']
+    excel_file = request.files['excel']
+    
+    if image_file.filename == '' or excel_file.filename == '':
+        return jsonify({'error': 'No selected files'}), 400
+    
+    if not (allowed_file(image_file.filename) and allowed_file(excel_file.filename)):
+        return jsonify({'error': 'Invalid file type'}), 400
+    
+    # Save uploaded files
+    image_path = os.path.join(app.config['UPLOAD_FOLDER'], secure_filename(image_file.filename))
+    excel_path = os.path.join(app.config['UPLOAD_FOLDER'], secure_filename(excel_file.filename))
+    
+    image_file.save(image_path)
+    excel_file.save(excel_path)
+    
+    try:
+        # Get form parameters
+        num_cols = int(request.form.get('num_cols', 20))
+        num_rows = int(request.form.get('num_rows', 20))
+        square_tiles = 'square_tiles' in request.form
+        tile_size = request.form.get('tile_size_pixels')
+        tile_size = int(tile_size) if tile_size and tile_size.isdigit() else None
+        
+        margin = request.form.get('margin_pixels')
+        margin = int(margin) if margin and margin.isdigit() else 0
+        
+        qr_padding = request.form.get('qr_padding_pixels')
+        qr_padding = int(qr_padding) if qr_padding and qr_padding.isdigit() else 0
+        
+        qr_opacity = request.form.get('qr_opacity', '100')
+        qr_opacity = int(qr_opacity) if qr_opacity.isdigit() else 100
+        qr_opacity = max(0, min(100, qr_opacity))
+        
+        bg_opacity = request.form.get('bg_opacity', '100')
+        bg_opacity = int(bg_opacity) if bg_opacity.isdigit() else 100
+        bg_opacity = max(0, min(100, bg_opacity))
+        
+        width_inches = request.form.get('width_inches', '0')
+        width_inches = float(width_inches) if width_inches else 0
+        
+        height_inches = request.form.get('height_inches', '0')
+        height_inches = float(height_inches) if height_inches else 0
+        
+        dpi = request.form.get('dpi', '300')
+        dpi = int(dpi) if dpi.isdigit() else 300
+        dpi = max(72, min(1200, dpi))
+        
+        result_path = generate_qr_mosaic(
+            image_path,
+            excel_path,
+            num_cols,
+            num_rows,
+            square_tiles,
+            tile_size,
+            margin,
+            qr_padding,
+            qr_opacity,
+            width_inches,
+            height_inches,
+            dpi,
+            bg_opacity,
+            preview=True
+        )
+        
+        # Convert the image to base64 for the preview
+        with open(result_path, 'rb') as img_file:
+            img_base64 = base64.b64encode(img_file.read()).decode('utf-8')
+        
+        return jsonify({'preview': f'data:image/jpeg;base64,{img_base64}'})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=8000, debug=True) 

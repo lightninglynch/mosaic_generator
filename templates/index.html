@@ -100,12 +100,24 @@
                             </div>
                         </div>
                         <div class="col-md-6">
-                            <div class="mb-3">
-                                <label for="qr_opacity" class="form-label">QR Code Opacity (%)</label>
-                                <input type="number" class="form-control" id="qr_opacity" name="qr_opacity" value="100" min="0" max="100">
-                                <div class="form-text">Adjust QR code transparency (100% = fully opaque)</div>
+                            <div class="form-group">
+                                <label for="qr_opacity">QR Code Opacity:</label>
+                                <input type="range" class="form-control-range" id="qr_opacity" name="qr_opacity" min="0" max="100" value="100">
+                                <small class="form-text text-muted">Adjust QR code transparency (0-100%)</small>
                             </div>
                         </div>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="bg_opacity">Background Image Opacity:</label>
+                        <input type="range" class="form-control-range" id="bg_opacity" name="bg_opacity" min="0" max="100" value="100">
+                        <small class="form-text text-muted">Adjust background image transparency (0-100%)</small>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="margin_pixels">Margin (pixels):</label>
+                        <input type="number" class="form-control" id="margin_pixels" name="margin_pixels" value="0" min="0" step="1">
+                        <small class="form-text text-muted">Add extra white space around the final image in pixels</small>
                     </div>
                     
                     <div class="mb-3 form-check">
@@ -120,11 +132,28 @@
     </div>
 </div>
 
+<div class="row mt-4">
+    <div class="col-md-8 offset-md-2">
+        <div class="card">
+            <div class="card-body">
+                <h3 class="card-title">Live Preview</h3>
+                <div id="preview-container" class="text-center">
+                    <p class="text-muted">Upload an image and Excel file to see a preview</p>
+                    <img id="preview-image" style="max-width: 100%; display: none;">
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
 <script>
 document.addEventListener('DOMContentLoaded', function() {
     const form = document.getElementById('mosaic-form');
     const loadingOverlay = document.getElementById('loading-overlay');
     const allInputs = form.querySelectorAll('input, button');
+    const previewImage = document.getElementById('preview-image');
+    const previewContainer = document.getElementById('preview-container');
+    let previewTimeout;
     
     // Add DPI conversion handling
     const dpiInput = document.getElementById('dpi');
@@ -158,6 +187,57 @@ document.addEventListener('DOMContentLoaded', function() {
     inchInputs.forEach(inputId => {
         document.getElementById(inputId).addEventListener('input', updatePixelValues);
     });
+    
+    function updatePreview() {
+        const imageFile = form.querySelector('input[name="image"]').files[0];
+        const excelFile = form.querySelector('input[name="excel"]').files[0];
+        
+        if (!imageFile || !excelFile) {
+            previewImage.style.display = 'none';
+            previewContainer.querySelector('p').style.display = 'block';
+            return;
+        }
+        
+        // Clear any existing timeout
+        if (previewTimeout) {
+            clearTimeout(previewTimeout);
+        }
+        
+        // Set a new timeout to debounce the preview update
+        previewTimeout = setTimeout(() => {
+            const formData = new FormData(form);
+            
+            fetch('/preview', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.error) {
+                    console.error('Preview error:', data.error);
+                    return;
+                }
+                
+                previewImage.src = data.preview;
+                previewImage.style.display = 'block';
+                previewContainer.querySelector('p').style.display = 'none';
+            })
+            .catch(error => {
+                console.error('Error updating preview:', error);
+            });
+        }, 500); // 500ms debounce
+    }
+
+    // Add event listeners for all form inputs
+    allInputs.forEach(input => {
+        if (input.type !== 'file') {
+            input.addEventListener('input', updatePreview);
+        }
+    });
+
+    // Add event listeners for file inputs
+    form.querySelector('input[name="image"]').addEventListener('change', updatePreview);
+    form.querySelector('input[name="excel"]').addEventListener('change', updatePreview);
     
     function handleFormSubmit(e) {
         e.preventDefault();
