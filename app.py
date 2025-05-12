@@ -111,15 +111,16 @@ def validate_memory_requirements(width_inches, height_inches, dpi, margin=0, max
     }
 
 def generate_qr_mosaic(image_path, excel_path, num_cols, num_rows, square_tiles, tile_size, 
-                      margin=0, qr_padding=0, qr_opacity=100, width_inches=0, height_inches=0, dpi=300, bg_opacity=100, preview=False, download_type='jpg', tile_gap=0):
+                      margin=0, qr_opacity=100, width_inches=0, height_inches=0, dpi=300, bg_opacity=100, preview=False, download_type='jpg', tile_gap=0):
     # Load Excel data
     df = pd.read_excel(excel_path)
     
     # Convert decimal values to integers for pixel calculations
     margin = int(margin)
-    qr_padding = int(qr_padding)
     if tile_size is not None:
         tile_size = int(tile_size)
+    # Convert tile_gap from inches to pixels
+    gap = int(float(tile_gap) * dpi) if tile_gap else 0
     
     # Validate memory requirements for full-size generation
     if not preview:
@@ -194,13 +195,9 @@ def generate_qr_mosaic(image_path, excel_path, num_cols, num_rows, square_tiles,
     mosaic = Image.new("RGB", (final_width, final_height), "white")
 
     # Create a pixelated version of the base image
-    # First, resize to a small size to create the pixelation effect
     small_size = (num_cols, num_rows)
     pixelated = base_image.resize(small_size, resample=Image.NEAREST)
-    # Then resize back to the original size
     pixelated = pixelated.resize((mosaic_width, mosaic_height), resample=Image.NEAREST)
-
-    # Apply blur to the pixelated image
     pixelated = pixelated.filter(ImageFilter.GaussianBlur(radius=5))
 
     # Apply background opacity if less than 100%
@@ -224,18 +221,6 @@ def generate_qr_mosaic(image_path, excel_path, num_cols, num_rows, square_tiles,
                 current_tile_width = computed_tile_width
                 current_tile_height = computed_tile_height
 
-            # --- Tile gap logic ---
-            gap = int(tile_gap) if tile_gap else 0
-            # Draw the gap as a filled rectangle before pasting the QR code
-            if gap > 0:
-                gap_x = margin + (col * current_tile_width)
-                gap_y = margin + (row * current_tile_height)
-                gap_w = current_tile_width
-                gap_h = current_tile_height
-                # Draw a white rectangle (or choose a color)
-                draw = ImageDraw.Draw(mosaic)
-                draw.rectangle([gap_x, gap_y, gap_x + gap_w - 1, gap_y + gap_h - 1], fill="white")
-
             # Get the URL for this tile; repeat the list if needed.
             url = df.iloc[link_index % len(df)]["URL"]
             link_index += 1
@@ -247,17 +232,9 @@ def generate_qr_mosaic(image_path, excel_path, num_cols, num_rows, square_tiles,
                 tile_center_x = tile_x + current_tile_width // 2
                 tile_center_y = tile_y + current_tile_height // 2
                 bg_color = pixelated.getpixel((tile_center_x, tile_center_y))
-                print(f"Tile {col},{row} color: {bg_color}")
-                
-                # Handle both RGB and RGBA color modes
-                if len(bg_color) == 4:  # RGBA
-                    bg_color = bg_color[:3]  # Take only RGB components
-                
-                # Convert RGB tuple to hex color string
+                if len(bg_color) == 4:
+                    bg_color = bg_color[:3]
                 bg_color_hex = '#{:02x}{:02x}{:02x}'.format(*bg_color)
-                print(f"Converted to hex: {bg_color_hex}")
-
-                # Generate the QR code.
                 qr = qrcode.QRCode(
                     version=1,
                     error_correction=qrcode.constants.ERROR_CORRECT_L,
@@ -267,23 +244,16 @@ def generate_qr_mosaic(image_path, excel_path, num_cols, num_rows, square_tiles,
                 qr.add_data(url)
                 qr.make(fit=True)
                 qr_img = qr.make_image(fill_color="black", back_color=bg_color_hex)
-                
-                # Convert QR code to RGBA mode for transparency
                 qr_img = qr_img.convert('RGBA')
-                
-                # Create a mask from the black pixels of the QR code
                 data = qr_img.getdata()
                 new_data = []
                 for item in data:
-                    # If pixel is black (or very close to black), make it fully opaque
                     if item[0] < 10 and item[1] < 10 and item[2] < 10:
                         new_data.append((0, 0, 0, 255))
                     else:
-                        new_data.append((255, 255, 255, 0))  # Make background transparent
+                        new_data.append((255, 255, 255, 0))
                 qr_img.putdata(new_data)
             except Exception as e:
-                print(f"Error processing tile {col},{row}: {str(e)}")
-                # Fallback to white background if there's an error
                 qr = qrcode.QRCode(
                     version=1,
                     error_correction=qrcode.constants.ERROR_CORRECT_L,
@@ -294,9 +264,9 @@ def generate_qr_mosaic(image_path, excel_path, num_cols, num_rows, square_tiles,
                 qr.make(fit=True)
                 qr_img = qr.make_image(fill_color="black", back_color="white")
 
-            # Resize QR code to fit within the tile with padding and gap
-            qr_size = min(current_tile_width, current_tile_height) - (2 * qr_padding) - (2 * gap)
-            qr_size = max(qr_size, 1)  # Prevent negative or zero size
+            # Resize QR code to fit within the tile with the gap
+            qr_size = min(current_tile_width, current_tile_height) - (2 * gap)
+            qr_size = max(qr_size, 1)
             qr_img = qr_img.resize((qr_size, qr_size), resample=Image.LANCZOS)
 
             # Calculate position to center the QR code in the tile (respecting gap)
@@ -305,11 +275,8 @@ def generate_qr_mosaic(image_path, excel_path, num_cols, num_rows, square_tiles,
 
             # Apply QR code opacity if less than 100%
             if qr_opacity < 100:
-                # Create a new image with the same size
                 qr_bg = Image.new("RGBA", qr_img.size, (255, 255, 255, 0))
-                # Create a mask with the desired opacity
                 qr_mask = Image.new("L", qr_img.size, int(qr_opacity * 2.55))
-                # Composite the QR code with the mask
                 qr_img = Image.composite(qr_img, qr_bg, qr_mask)
 
             # Paste the QR code onto the mosaic
@@ -321,7 +288,6 @@ def generate_qr_mosaic(image_path, excel_path, num_cols, num_rows, square_tiles,
         mosaic.save(result_path, 'PNG', dpi=(dpi, dpi))
     elif download_type == 'pdf':
         result_path = os.path.join(app.config['UPLOAD_FOLDER'], 'result.pdf')
-        # Pillow can only save RGB images as PDF
         if mosaic.mode != 'RGB':
             mosaic = mosaic.convert('RGB')
         mosaic.save(result_path, 'PDF', resolution=dpi)
@@ -381,10 +347,6 @@ def index():
             margin = request.form.get('margin_pixels')
             margin = float(margin) if margin and margin.replace('.', '').isdigit() else 0
             
-            qr_padding = request.form.get('qr_padding_pixels')
-            qr_padding = float(qr_padding) if qr_padding and qr_padding.replace('.', '').isdigit() else 0
-            
-            # Get QR opacity parameter
             qr_opacity = request.form.get('qr_opacity', '100')
             qr_opacity = int(qr_opacity) if qr_opacity.isdigit() else 100
             qr_opacity = max(0, min(100, qr_opacity))  # Clamp between 0 and 100
@@ -419,7 +381,6 @@ def index():
                 square_tiles,
                 tile_size,
                 margin,
-                qr_padding,
                 qr_opacity,
                 width_inches,
                 height_inches,
@@ -495,9 +456,6 @@ def preview():
             margin = request.form.get('margin_pixels')
             margin = float(margin) if margin and margin.replace('.', '').isdigit() else 0
             
-            qr_padding = request.form.get('qr_padding_pixels')
-            qr_padding = float(qr_padding) if qr_padding and qr_padding.replace('.', '').isdigit() else 0
-            
             qr_opacity = request.form.get('qr_opacity', '100')
             qr_opacity = int(qr_opacity) if qr_opacity.isdigit() else 100
             qr_opacity = max(0, min(100, qr_opacity))
@@ -524,7 +482,7 @@ def preview():
             
             print("Generating preview with parameters:")
             print(f"num_cols: {num_cols}, num_rows: {num_rows}")
-            print(f"tile_size: {tile_size}, margin: {margin}, qr_padding: {qr_padding}")
+            print(f"tile_size: {tile_size}, margin: {margin}, qr_opacity: {qr_opacity}")
             print(f"width_inches: {width_inches}, height_inches: {height_inches}, dpi: {dpi}")
             
             # Check memory requirements for the full-size image
@@ -538,7 +496,6 @@ def preview():
                 square_tiles,
                 tile_size,
                 margin,
-                qr_padding,
                 qr_opacity,
                 width_inches,
                 height_inches,

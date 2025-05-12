@@ -92,12 +92,6 @@
                             <div class="form-text">Visible gap between QR code tiles</div>
                         </div>
                         
-                        <div class="mb-3">
-                            <label for="margin" class="form-label">QR Code Margin (inches)</label>
-                            <input type="number" class="form-control" id="margin" name="margin" value="0" min="0" step="0.1">
-                            <div class="form-text">Add extra white space around the final image</div>
-                        </div>
-                        
                         <div class="row">
                             <div class="col-md-6">
                                 <div class="mb-3">
@@ -216,7 +210,7 @@ document.addEventListener('DOMContentLoaded', function() {
     
     // Add DPI conversion handling
     const dpiInput = document.getElementById('dpi');
-    const inchInputs = ['tile_size', 'margin', 'qr_padding'];
+    const inchInputs = ['tile_size', 'margin'];
     
     function inchesToPixels(inches, dpi) {
         return inches * dpi;
