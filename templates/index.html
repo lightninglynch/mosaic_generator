@@ -87,7 +87,13 @@
                         </div>
                         
                         <div class="mb-3">
-                            <label for="margin" class="form-label">Outer Margin (inches)</label>
+                            <label for="tile_gap" class="form-label">Tile Gap (inches)</label>
+                            <input type="number" class="form-control" id="tile_gap" name="tile_gap" value="0" min="0" step="0.01">
+                            <div class="form-text">Visible gap between QR code tiles</div>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label for="margin" class="form-label">QR Code Margin (inches)</label>
                             <input type="number" class="form-control" id="margin" name="margin" value="0" min="0" step="0.1">
                             <div class="form-text">Add extra white space around the final image</div>
                         </div>
@@ -95,24 +101,18 @@
                         <div class="row">
                             <div class="col-md-6">
                                 <div class="mb-3">
-                                    <label for="qr_padding" class="form-label">QR Code Padding (inches)</label>
-                                    <input type="number" class="form-control" id="qr_padding" name="qr_padding" value="0" min="0" step="0.1">
-                                    <div class="form-text">Add padding around each QR code</div>
-                                </div>
-                            </div>
-                            <div class="col-md-6">
-                                <div class="form-group">
-                                    <label for="qr_opacity">QR Code Opacity:</label>
-                                    <input type="range" class="form-control-range" id="qr_opacity" name="qr_opacity" min="0" max="100" value="100">
+                                    <label for="qr_opacity" class="form-label">QR Code Opacity: <span id="qr_opacity_value">100%</span></label>
+                                    <input type="range" class="form-range" id="qr_opacity" name="qr_opacity" min="0" max="100" value="100">
                                     <small class="form-text text-muted">Adjust QR code transparency (0-100%)</small>
                                 </div>
                             </div>
-                        </div>
-                        
-                        <div class="form-group">
-                            <label for="bg_opacity">Background Image Opacity:</label>
-                            <input type="range" class="form-control-range" id="bg_opacity" name="bg_opacity" min="0" max="100" value="100">
-                            <small class="form-text text-muted">Adjust background image transparency (0-100%)</small>
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label for="bg_opacity" class="form-label">Background Image Opacity: <span id="bg_opacity_value">100%</span></label>
+                                    <input type="range" class="form-range" id="bg_opacity" name="bg_opacity" min="0" max="100" value="100">
+                                    <small class="form-text text-muted">Adjust background image transparency (0-100%)</small>
+                                </div>
+                            </div>
                         </div>
                         
                         <div class="mb-3 form-check">
@@ -120,7 +120,22 @@
                             <label class="form-check-label" for="square_tiles">Force Square Tiles</label>
                         </div>
                         
-                        <div class="form-group">
+                        <div class="mb-3">
+                            <label for="download_type" class="form-label">Download Type</label>
+                            <select class="form-control" id="download_type" name="download_type">
+                                <option value="jpg">JPEG (.jpg)</option>
+                                <option value="png">PNG (.png)</option>
+                                <option value="pdf">PDF (.pdf)</option>
+                            </select>
+                        </div>
+                        
+                        <div class="form-group d-flex gap-2">
+                            <button type="button" class="btn btn-secondary" id="preview-button">
+                                <span class="button-text">Generate Preview</span>
+                                <div class="spinner-border spinner-border-sm d-none" role="status">
+                                    <span class="visually-hidden">Loading...</span>
+                                </div>
+                            </button>
                             <button type="submit" class="btn btn-primary" id="generate-button">
                                 <span class="button-text">Generate Mosaic</span>
                                 <div class="spinner-border spinner-border-sm d-none" role="status">
@@ -136,9 +151,9 @@
         <div class="col-md-6">
             <div class="card h-100">
                 <div class="card-body">
-                    <h3 class="card-title">Live Preview</h3>
+                    <h3 class="card-title">Preview</h3>
                     <div id="preview-container" class="text-center">
-                        <p class="text-muted" id="preview-placeholder">Upload an image and Excel file to see a preview</p>
+                        <p class="text-muted" id="preview-placeholder">Click "Generate Preview" to see a preview</p>
                         <div id="preview-loading" class="d-none">
                             <div class="spinner-border text-primary mb-2" role="status">
                                 <span class="visually-hidden">Loading...</span>
@@ -171,9 +186,20 @@
 
 <script>
 document.addEventListener('DOMContentLoaded', function() {
+    // Debug logging to check if elements exist
+    console.log('Checking required elements:');
+    console.log('form:', document.getElementById('mosaic-form'));
+    console.log('previewImage:', document.getElementById('preview-image'));
+    console.log('previewPlaceholder:', document.getElementById('preview-placeholder'));
+    console.log('previewLoading:', document.getElementById('preview-loading'));
+    console.log('memoryInfo:', document.getElementById('memory-info'));
+    
     const form = document.getElementById('mosaic-form');
     const loadingOverlay = document.getElementById('loading-overlay');
-    const allInputs = form.querySelectorAll('input, button');
+    const previewButton = document.getElementById('preview-button');
+    const previewButtonText = previewButton?.querySelector('.button-text');
+    const previewButtonSpinner = previewButton?.querySelector('.spinner-border');
+    const allInputs = form?.querySelectorAll('input, button') || [];
     const previewImage = document.getElementById('preview-image');
     const previewContainer = document.getElementById('preview-container');
     const previewPlaceholder = document.getElementById('preview-placeholder');
@@ -184,9 +210,8 @@ document.addEventListener('DOMContentLoaded', function() {
     const memoryWarning = document.getElementById('memory-warning');
     const memoryAlert = document.getElementById('memory-alert');
     const generateButton = document.getElementById('generate-button');
-    const buttonText = generateButton.querySelector('.button-text');
-    const buttonSpinner = generateButton.querySelector('.spinner-border');
-    let previewTimeout;
+    const buttonText = generateButton?.querySelector('.button-text');
+    const buttonSpinner = generateButton?.querySelector('.spinner-border');
     let isPreviewLoading = false;
     
     // Add DPI conversion handling
@@ -200,10 +225,12 @@ document.addEventListener('DOMContentLoaded', function() {
     // Create hidden pixel inputs
     inchInputs.forEach(inputId => {
         const inchInput = document.getElementById(inputId);
-        const pixelInput = document.createElement('input');
-        pixelInput.type = 'hidden';
-        pixelInput.name = inputId + '_pixels';
-        inchInput.parentNode.appendChild(pixelInput);
+        if (inchInput) {  // Only proceed if the input exists
+            const pixelInput = document.createElement('input');
+            pixelInput.type = 'hidden';
+            pixelInput.name = inputId + '_pixels';
+            inchInput.parentNode.appendChild(pixelInput);
+        }
     });
     
     function updatePixelValues() {
@@ -211,31 +238,40 @@ document.addEventListener('DOMContentLoaded', function() {
         inchInputs.forEach(inputId => {
             const inchInput = document.getElementById(inputId);
             const pixelInput = document.querySelector(`input[name="${inputId}_pixels"]`);
-            const inchValue = parseFloat(inchInput.value) || 0;
-            const pixelValue = Math.round(inchesToPixels(inchValue, dpi));
-            pixelInput.value = pixelValue;
+            if (inchInput && pixelInput) {  // Only update if both inputs exist
+                const inchValue = parseFloat(inchInput.value) || 0;
+                const pixelValue = Math.round(inchesToPixels(inchValue, dpi));
+                pixelInput.value = pixelValue;
+            }
         });
     }
     
-    dpiInput.addEventListener('input', updatePixelValues);
+    if (dpiInput) {  // Only add event listener if dpiInput exists
+        dpiInput.addEventListener('input', updatePixelValues);
+    }
+    
     inchInputs.forEach(inputId => {
-        document.getElementById(inputId).addEventListener('input', updatePixelValues);
+        const input = document.getElementById(inputId);
+        if (input) {  // Only add event listener if input exists
+            input.addEventListener('input', updatePixelValues);
+        }
     });
     
-    function updateMemoryInfo(memoryInfo) {
-        currentMemory.textContent = memoryInfo.estimated_memory_mb.toFixed(2);
-        maxMemory.textContent = memoryInfo.max_memory_mb;
+    function updateMemoryInfo(memoryData) {
+        if (!memoryInfo) return;
+        currentMemory.textContent = memoryData.estimated_memory_mb.toFixed(2);
+        maxMemory.textContent = memoryData.max_memory_mb;
         memoryInfo.style.display = 'block';
         
-        if (memoryInfo.exceeds_limit) {
+        if (memoryData.exceeds_limit) {
             memoryAlert.classList.remove('alert-info');
             memoryAlert.classList.add('alert-danger');
             memoryWarning.style.display = 'block';
             
             // Calculate recommended adjustments
             const currentDpi = parseInt(document.getElementById('dpi').value);
-            const recommendedDpi = Math.floor(Math.sqrt(memoryInfo.max_memory_mb / memoryInfo.estimated_memory_mb) * currentDpi);
-            const reducePercent = Math.floor((1 - Math.sqrt(memoryInfo.max_memory_mb / memoryInfo.estimated_memory_mb)) * 100);
+            const recommendedDpi = Math.floor(Math.sqrt(memoryData.max_memory_mb / memoryData.estimated_memory_mb) * currentDpi);
+            const reducePercent = Math.floor((1 - Math.sqrt(memoryData.max_memory_mb / memoryData.estimated_memory_mb)) * 100);
             
             document.getElementById('current-dpi').textContent = currentDpi;
             document.getElementById('recommended-dpi').textContent = recommendedDpi;
@@ -247,41 +283,82 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
     
-    function setGenerateButtonState(isLoading) {
-        isPreviewLoading = isLoading;
-        generateButton.disabled = isLoading;
-        buttonText.textContent = isLoading ? 'Generating Preview...' : 'Generate Mosaic';
-        buttonSpinner.classList.toggle('d-none', !isLoading);
-    }
-
-    function updatePreview() {
-        const imageFile = form.querySelector('input[name="image"]').files[0];
-        const excelFile = form.querySelector('input[name="excel"]').files[0];
-        
-        if (!imageFile || !excelFile) {
-            previewImage.style.display = 'none';
-            previewLoading.classList.add('d-none');
-            previewPlaceholder.style.display = 'block';
-            memoryInfo.style.display = 'none';
-            setGenerateButtonState(false);
+    function setPreviewButtonState(isLoading) {
+        if (!previewButton || !previewButtonText || !previewButtonSpinner) {
+            console.error('Preview button elements not found');
             return;
         }
         
-        // Clear any existing timeout
-        if (previewTimeout) {
-            clearTimeout(previewTimeout);
+        isPreviewLoading = isLoading;
+        previewButton.disabled = isLoading;
+        previewButtonText.textContent = isLoading ? 'Generating Preview...' : 'Generate Preview';
+        previewButtonSpinner.classList.toggle('d-none', !isLoading);
+    }
+
+    function updatePreview() {
+        // Debug logging
+        console.log('Starting preview update');
+        
+        // Check if all required elements exist
+        const elements = {
+            form: document.getElementById('mosaic-form'),
+            previewImage: document.getElementById('preview-image'),
+            previewPlaceholder: document.getElementById('preview-placeholder'),
+            previewLoading: document.getElementById('preview-loading'),
+            memoryInfo: document.getElementById('memory-info'),
+            previewButton: document.getElementById('preview-button')
+        };
+
+        // Log the state of each element
+        console.log('Element states:', Object.entries(elements).reduce((acc, [key, el]) => {
+            acc[key] = {
+                exists: !!el,
+                display: el ? window.getComputedStyle(el).display : 'N/A',
+                visibility: el ? window.getComputedStyle(el).visibility : 'N/A'
+            };
+            return acc;
+        }, {}));
+
+        // Check for missing elements
+        const missingElements = Object.entries(elements)
+            .filter(([_, el]) => !el)
+            .map(([name]) => name);
+
+        if (missingElements.length > 0) {
+            console.error('Missing elements:', missingElements);
+            alert('Error: Some required elements are missing. Please refresh the page and try again.');
+            return;
         }
+
+        const { form, previewImage, previewPlaceholder, previewLoading, memoryInfo } = elements;
+
+        // Check for files
+        const imageFile = form.querySelector('input[name="image"]')?.files[0];
+        const excelFile = form.querySelector('input[name="excel"]')?.files[0];
         
-        // Show loading spinner
-        previewImage.style.display = 'none';
-        previewPlaceholder.style.display = 'none';
-        previewLoading.classList.remove('d-none');
-        memoryInfo.style.display = 'none';
-        setGenerateButtonState(true);
-        
-        // Set a new timeout to debounce the preview update
-        previewTimeout = setTimeout(() => {
+        if (!imageFile || !excelFile) {
+            alert('Please select both an image and an Excel file first.');
+            return;
+        }
+
+        try {
+            // Show loading spinner
+            previewImage.style.display = 'none';
+            previewPlaceholder.style.display = 'none';
+            previewLoading.classList.remove('d-none');
+            memoryInfo.style.display = 'none';
+            setPreviewButtonState(true);
+            
+            // Update pixel values before preview
+            updatePixelValues();
+            
             const formData = new FormData(form);
+            
+            // Debug logging
+            console.log('Form data being sent:');
+            for (let pair of formData.entries()) {
+                console.log(pair[0] + ': ' + pair[1]);
+            }
             
             fetch('/preview', {
                 method: 'POST',
@@ -289,19 +366,20 @@ document.addEventListener('DOMContentLoaded', function() {
             })
             .then(response => {
                 if (!response.ok) {
-                    throw new Error('Network response was not ok');
+                    return response.text().then(text => {
+                        throw new Error(`Server responded with ${response.status}: ${text}`);
+                    });
                 }
                 return response.json();
             })
             .then(data => {
+                console.log('Received preview data:', data);
+                
                 if (data.error) {
-                    console.error('Preview error:', data.error);
-                    previewLoading.classList.add('d-none');
-                    previewPlaceholder.style.display = 'block';
-                    setGenerateButtonState(false);
-                    return;
+                    throw new Error(data.error);
                 }
                 
+                // Update preview image
                 previewImage.src = data.preview;
                 previewImage.style.display = 'block';
                 previewLoading.classList.add('d-none');
@@ -311,34 +389,27 @@ document.addEventListener('DOMContentLoaded', function() {
                 if (data.memory_info) {
                     updateMemoryInfo(data.memory_info);
                 }
-                setGenerateButtonState(false);
             })
             .catch(error => {
-                console.error('Error updating preview:', error);
+                console.error('Error in preview generation:', error);
                 previewLoading.classList.add('d-none');
                 previewPlaceholder.style.display = 'block';
-                setGenerateButtonState(false);
+                alert('Error generating preview: ' + error.message);
+            })
+            .finally(() => {
+                setPreviewButtonState(false);
             });
-        }, 500); // 500ms debounce
+        } catch (error) {
+            console.error('Error in preview update:', error);
+            alert('Error updating preview: ' + error.message);
+            setPreviewButtonState(false);
+        }
     }
 
-    // Add event listeners for all form inputs
-    allInputs.forEach(input => {
-        if (input.type !== 'file' && input.id !== 'generate-button') {
-            input.addEventListener('input', () => {
-                // Only update preview if we have files
-                const imageFile = form.querySelector('input[name="image"]').files[0];
-                const excelFile = form.querySelector('input[name="excel"]').files[0];
-                if (imageFile && excelFile) {
-                    updatePreview();
-                }
-            });
-        }
-    });
-
-    // Add event listeners for file inputs
-    form.querySelector('input[name="image"]').addEventListener('change', updatePreview);
-    form.querySelector('input[name="excel"]').addEventListener('change', updatePreview);
+    // Add click handler for preview button
+    if (previewButton) {
+        previewButton.addEventListener('click', updatePreview);
+    }
     
     function handleFormSubmit(e) {
         e.preventDefault();
@@ -349,7 +420,9 @@ document.addEventListener('DOMContentLoaded', function() {
         }
         
         // Show loading overlay
-        loadingOverlay.style.display = 'block';
+        if (loadingOverlay) {
+            loadingOverlay.style.display = 'block';
+        }
         
         // Update pixel values before submission
         updatePixelValues();
@@ -369,21 +442,26 @@ document.addEventListener('DOMContentLoaded', function() {
                     Mosaic generated successfully!
                     <a href="/download" class="btn btn-primary ms-3">Download Result</a>
                 `;
-                form.parentNode.insertBefore(successAlert, form.nextSibling);
-                loadingOverlay.style.display = 'none';
+                if (form && form.parentNode) {
+                    form.parentNode.insertBefore(successAlert, form.nextSibling);
+                }
+                if (loadingOverlay) {
+                    loadingOverlay.style.display = 'none';
+                }
             } else {
                 throw new Error('Network response was not ok');
             }
         })
         .catch(error => {
             console.error('Error:', error);
-            loadingOverlay.style.display = 'none';
+            if (loadingOverlay) {
+                loadingOverlay.style.display = 'none';
+            }
             alert('An error occurred while generating the mosaic. Please try again.');
         });
     }
     
     function initializeForm() {
-        const form = document.getElementById('mosaic-form');
         if (form) {
             form.addEventListener('submit', handleFormSubmit);
         }
@@ -391,6 +469,24 @@ document.addEventListener('DOMContentLoaded', function() {
     
     // Initialize the form
     initializeForm();
+
+    // Add event listeners for opacity sliders
+    const qrOpacitySlider = document.getElementById('qr_opacity');
+    const qrOpacityValue = document.getElementById('qr_opacity_value');
+    const bgOpacitySlider = document.getElementById('bg_opacity');
+    const bgOpacityValue = document.getElementById('bg_opacity_value');
+
+    if (qrOpacitySlider && qrOpacityValue) {
+        qrOpacitySlider.addEventListener('input', function() {
+            qrOpacityValue.textContent = this.value + '%';
+        });
+    }
+
+    if (bgOpacitySlider && bgOpacityValue) {
+        bgOpacitySlider.addEventListener('input', function() {
+            bgOpacityValue.textContent = this.value + '%';
+        });
+    }
 });
 </script>
 {% endblock %} 

@@ -1,7 +1,7 @@
 import os
-from flask import Flask, render_template, request, send_file, jsonify
+from flask import Flask, render_template, request, send_file, jsonify, session
 from werkzeug.utils import secure_filename
-from PIL import Image, ImageFilter
+from PIL import Image, ImageFilter, ImageDraw
 import pandas as pd
 import qrcode
 import base64
@@ -111,9 +111,15 @@ def validate_memory_requirements(width_inches, height_inches, dpi, margin=0, max
     }
 
 def generate_qr_mosaic(image_path, excel_path, num_cols, num_rows, square_tiles, tile_size, 
-                      margin=0, qr_padding=0, qr_opacity=100, width_inches=0, height_inches=0, dpi=300, bg_opacity=100, preview=False):
+                      margin=0, qr_padding=0, qr_opacity=100, width_inches=0, height_inches=0, dpi=300, bg_opacity=100, preview=False, download_type='jpg', tile_gap=0):
     # Load Excel data
     df = pd.read_excel(excel_path)
+    
+    # Convert decimal values to integers for pixel calculations
+    margin = int(margin)
+    qr_padding = int(qr_padding)
+    if tile_size is not None:
+        tile_size = int(tile_size)
     
     # Validate memory requirements for full-size generation
     if not preview:
@@ -218,35 +224,87 @@ def generate_qr_mosaic(image_path, excel_path, num_cols, num_rows, square_tiles,
                 current_tile_width = computed_tile_width
                 current_tile_height = computed_tile_height
 
-            # Get the URL for this tile; use a fallback if needed.
-            if link_index < len(df):
-                url = df.iloc[link_index]["URL"]
-            else:
-                url = "https://example.com"
+            # --- Tile gap logic ---
+            gap = int(tile_gap) if tile_gap else 0
+            # Draw the gap as a filled rectangle before pasting the QR code
+            if gap > 0:
+                gap_x = margin + (col * current_tile_width)
+                gap_y = margin + (row * current_tile_height)
+                gap_w = current_tile_width
+                gap_h = current_tile_height
+                # Draw a white rectangle (or choose a color)
+                draw = ImageDraw.Draw(mosaic)
+                draw.rectangle([gap_x, gap_y, gap_x + gap_w - 1, gap_y + gap_h - 1], fill="white")
+
+            # Get the URL for this tile; repeat the list if needed.
+            url = df.iloc[link_index % len(df)]["URL"]
             link_index += 1
 
-            # Generate the QR code.
-            qr = qrcode.QRCode(
-                version=1,
-                error_correction=qrcode.constants.ERROR_CORRECT_L,
-                box_size=10,
-                border=0,
-            )
-            qr.add_data(url)
-            qr.make(fit=True)
-            qr_img = qr.make_image(fill_color="black", back_color="white")
+            # Get the background color for this tile
+            try:
+                tile_x = col * current_tile_width
+                tile_y = row * current_tile_height
+                tile_center_x = tile_x + current_tile_width // 2
+                tile_center_y = tile_y + current_tile_height // 2
+                bg_color = pixelated.getpixel((tile_center_x, tile_center_y))
+                print(f"Tile {col},{row} color: {bg_color}")
+                
+                # Handle both RGB and RGBA color modes
+                if len(bg_color) == 4:  # RGBA
+                    bg_color = bg_color[:3]  # Take only RGB components
+                
+                # Convert RGB tuple to hex color string
+                bg_color_hex = '#{:02x}{:02x}{:02x}'.format(*bg_color)
+                print(f"Converted to hex: {bg_color_hex}")
 
-            # Resize QR code to fit within the tile with padding
-            qr_size = min(current_tile_width, current_tile_height) - (2 * qr_padding)
+                # Generate the QR code.
+                qr = qrcode.QRCode(
+                    version=1,
+                    error_correction=qrcode.constants.ERROR_CORRECT_L,
+                    box_size=10,
+                    border=0,
+                )
+                qr.add_data(url)
+                qr.make(fit=True)
+                qr_img = qr.make_image(fill_color="black", back_color=bg_color_hex)
+                
+                # Convert QR code to RGBA mode for transparency
+                qr_img = qr_img.convert('RGBA')
+                
+                # Create a mask from the black pixels of the QR code
+                data = qr_img.getdata()
+                new_data = []
+                for item in data:
+                    # If pixel is black (or very close to black), make it fully opaque
+                    if item[0] < 10 and item[1] < 10 and item[2] < 10:
+                        new_data.append((0, 0, 0, 255))
+                    else:
+                        new_data.append((255, 255, 255, 0))  # Make background transparent
+                qr_img.putdata(new_data)
+            except Exception as e:
+                print(f"Error processing tile {col},{row}: {str(e)}")
+                # Fallback to white background if there's an error
+                qr = qrcode.QRCode(
+                    version=1,
+                    error_correction=qrcode.constants.ERROR_CORRECT_L,
+                    box_size=10,
+                    border=0,
+                )
+                qr.add_data(url)
+                qr.make(fit=True)
+                qr_img = qr.make_image(fill_color="black", back_color="white")
+
+            # Resize QR code to fit within the tile with padding and gap
+            qr_size = min(current_tile_width, current_tile_height) - (2 * qr_padding) - (2 * gap)
+            qr_size = max(qr_size, 1)  # Prevent negative or zero size
             qr_img = qr_img.resize((qr_size, qr_size), resample=Image.LANCZOS)
 
-            # Calculate position to center the QR code in the tile
-            paste_x = margin + (col * current_tile_width) + (current_tile_width - qr_size) // 2
-            paste_y = margin + (row * current_tile_height) + (current_tile_height - qr_size) // 2
+            # Calculate position to center the QR code in the tile (respecting gap)
+            paste_x = margin + (col * current_tile_width) + gap + (current_tile_width - 2 * gap - qr_size) // 2
+            paste_y = margin + (row * current_tile_height) + gap + (current_tile_height - 2 * gap - qr_size) // 2
 
             # Apply QR code opacity if less than 100%
             if qr_opacity < 100:
-                qr_img = qr_img.convert("RGBA")
                 # Create a new image with the same size
                 qr_bg = Image.new("RGBA", qr_img.size, (255, 255, 255, 0))
                 # Create a mask with the desired opacity
@@ -258,8 +316,18 @@ def generate_qr_mosaic(image_path, excel_path, num_cols, num_rows, square_tiles,
             mosaic.paste(qr_img, (paste_x, paste_y), qr_img)
 
     # Save the final image
-    result_path = os.path.join(app.config['UPLOAD_FOLDER'], 'result.jpg')
-    mosaic.save(result_path, 'JPEG', quality=95, dpi=(dpi, dpi))
+    if download_type == 'png':
+        result_path = os.path.join(app.config['UPLOAD_FOLDER'], 'result.png')
+        mosaic.save(result_path, 'PNG', dpi=(dpi, dpi))
+    elif download_type == 'pdf':
+        result_path = os.path.join(app.config['UPLOAD_FOLDER'], 'result.pdf')
+        # Pillow can only save RGB images as PDF
+        if mosaic.mode != 'RGB':
+            mosaic = mosaic.convert('RGB')
+        mosaic.save(result_path, 'PDF', resolution=dpi)
+    else:
+        result_path = os.path.join(app.config['UPLOAD_FOLDER'], 'result.jpg')
+        mosaic.save(result_path, 'JPEG', quality=95, dpi=(dpi, dpi))
     return result_path
 
 @app.route('/', methods=['GET', 'POST'])
@@ -306,15 +374,15 @@ def index():
         num_rows = int(request.form.get('num_rows', 20))
         square_tiles = 'square_tiles' in request.form
         tile_size = request.form.get('tile_size_pixels')
-        tile_size = int(tile_size) if tile_size and tile_size.isdigit() else None
+        tile_size = float(tile_size) if tile_size and tile_size.replace('.', '').isdigit() else None
         
         try:
             # Get pixel values instead of direct inputs
             margin = request.form.get('margin_pixels')
-            margin = int(margin) if margin and margin.isdigit() else 0
+            margin = float(margin) if margin and margin.replace('.', '').isdigit() else 0
             
             qr_padding = request.form.get('qr_padding_pixels')
-            qr_padding = int(qr_padding) if qr_padding and qr_padding.isdigit() else 0
+            qr_padding = float(qr_padding) if qr_padding and qr_padding.replace('.', '').isdigit() else 0
             
             # Get QR opacity parameter
             qr_opacity = request.form.get('qr_opacity', '100')
@@ -337,6 +405,12 @@ def index():
             dpi = int(dpi) if dpi.isdigit() else 300
             dpi = max(72, min(1200, dpi))  # Clamp between 72 and 1200
             
+            download_type = request.form.get('download_type', 'jpg')
+            
+            # Get tile_gap parameter
+            tile_gap = request.form.get('tile_gap', '0')
+            tile_gap = float(tile_gap) if tile_gap else 0
+            
             result_path = generate_qr_mosaic(
                 image_path,
                 excel_path,
@@ -350,8 +424,12 @@ def index():
                 width_inches,
                 height_inches,
                 dpi,
-                bg_opacity
+                bg_opacity,
+                download_type=download_type,
+                tile_gap=tile_gap
             )
+            session['result_path'] = result_path
+            session['download_type'] = download_type
             return render_template('index.html', result=True)
         except Exception as e:
             return render_template('index.html', error=str(e))
@@ -360,9 +438,18 @@ def index():
 
 @app.route('/download')
 def download():
-    return send_file(os.path.join(app.config['UPLOAD_FOLDER'], 'result.jpg'),
-                    as_attachment=True,
-                    download_name='qr_mosaic.jpg')
+    result_path = session.get('result_path', os.path.join(app.config['UPLOAD_FOLDER'], 'result.jpg'))
+    download_type = session.get('download_type', 'jpg')
+    if download_type == 'png':
+        mimetype = 'image/png'
+        filename = 'qr_mosaic.png'
+    elif download_type == 'pdf':
+        mimetype = 'application/pdf'
+        filename = 'qr_mosaic.pdf'
+    else:
+        mimetype = 'image/jpeg'
+        filename = 'qr_mosaic.jpg'
+    return send_file(result_path, as_attachment=True, download_name=filename, mimetype=mimetype)
 
 @app.route('/health')
 def health_check():
@@ -370,93 +457,119 @@ def health_check():
 
 @app.route('/preview', methods=['POST'])
 def preview():
-    if 'image' not in request.files or 'excel' not in request.files:
-        return jsonify({'error': 'Missing files'}), 400
-    
-    image_file = request.files['image']
-    excel_file = request.files['excel']
-    
-    if image_file.filename == '' or excel_file.filename == '':
-        return jsonify({'error': 'No selected files'}), 400
-    
-    if not (allowed_file(image_file.filename) and allowed_file(excel_file.filename)):
-        return jsonify({'error': 'Invalid file type'}), 400
-    
-    # Clean up old files
-    cleanup_old_files()
-    
-    # Generate unique filenames
-    image_filename = get_unique_filename(image_file.filename)
-    excel_filename = get_unique_filename(excel_file.filename)
-    
-    # Save uploaded files
-    image_path = os.path.join(app.config['UPLOAD_FOLDER'], image_filename)
-    excel_path = os.path.join(app.config['UPLOAD_FOLDER'], excel_filename)
-    
-    image_file.save(image_path)
-    excel_file.save(excel_path)
-    
     try:
-        # Get form parameters
-        num_cols = int(request.form.get('num_cols', 20))
-        num_rows = int(request.form.get('num_rows', 20))
-        square_tiles = 'square_tiles' in request.form
-        tile_size = request.form.get('tile_size_pixels')
-        tile_size = int(tile_size) if tile_size and tile_size.isdigit() else None
+        if 'image' not in request.files or 'excel' not in request.files:
+            return jsonify({'error': 'Missing files'}), 400
         
-        margin = request.form.get('margin_pixels')
-        margin = int(margin) if margin and margin.isdigit() else 0
+        image_file = request.files['image']
+        excel_file = request.files['excel']
         
-        qr_padding = request.form.get('qr_padding_pixels')
-        qr_padding = int(qr_padding) if qr_padding and qr_padding.isdigit() else 0
+        if image_file.filename == '' or excel_file.filename == '':
+            return jsonify({'error': 'No selected files'}), 400
         
-        qr_opacity = request.form.get('qr_opacity', '100')
-        qr_opacity = int(qr_opacity) if qr_opacity.isdigit() else 100
-        qr_opacity = max(0, min(100, qr_opacity))
+        if not (allowed_file(image_file.filename) and allowed_file(excel_file.filename)):
+            return jsonify({'error': 'Invalid file type'}), 400
         
-        bg_opacity = request.form.get('bg_opacity', '100')
-        bg_opacity = int(bg_opacity) if bg_opacity.isdigit() else 100
-        bg_opacity = max(0, min(100, bg_opacity))
+        # Clean up old files
+        cleanup_old_files()
         
-        width_inches = request.form.get('width_inches', '0')
-        width_inches = float(width_inches) if width_inches else 0
+        # Generate unique filenames
+        image_filename = get_unique_filename(image_file.filename)
+        excel_filename = get_unique_filename(excel_file.filename)
         
-        height_inches = request.form.get('height_inches', '0')
-        height_inches = float(height_inches) if height_inches else 0
+        # Save uploaded files
+        image_path = os.path.join(app.config['UPLOAD_FOLDER'], image_filename)
+        excel_path = os.path.join(app.config['UPLOAD_FOLDER'], excel_filename)
         
-        dpi = request.form.get('dpi', '300')
-        dpi = int(dpi) if dpi.isdigit() else 300
-        dpi = max(72, min(1200, dpi))
+        image_file.save(image_path)
+        excel_file.save(excel_path)
         
-        # Check memory requirements for the full-size image
-        memory_validation = validate_memory_requirements(width_inches, height_inches, dpi, margin)
-        
-        result_path = generate_qr_mosaic(
-            image_path,
-            excel_path,
-            num_cols,
-            num_rows,
-            square_tiles,
-            tile_size,
-            margin,
-            qr_padding,
-            qr_opacity,
-            width_inches,
-            height_inches,
-            dpi,
-            bg_opacity,
-            preview=True
-        )
-        
-        # Convert the image to base64 for the preview
-        with open(result_path, 'rb') as img_file:
-            img_base64 = base64.b64encode(img_file.read()).decode('utf-8')
-        
-        return jsonify({
-            'preview': f'data:image/jpeg;base64,{img_base64}',
-            'memory_info': memory_validation
-        })
+        try:
+            # Get form parameters
+            num_cols = int(request.form.get('num_cols', 20))
+            num_rows = int(request.form.get('num_rows', 20))
+            square_tiles = 'square_tiles' in request.form
+            tile_size = request.form.get('tile_size_pixels')
+            tile_size = float(tile_size) if tile_size and tile_size.replace('.', '').isdigit() else None
+            
+            margin = request.form.get('margin_pixels')
+            margin = float(margin) if margin and margin.replace('.', '').isdigit() else 0
+            
+            qr_padding = request.form.get('qr_padding_pixels')
+            qr_padding = float(qr_padding) if qr_padding and qr_padding.replace('.', '').isdigit() else 0
+            
+            qr_opacity = request.form.get('qr_opacity', '100')
+            qr_opacity = int(qr_opacity) if qr_opacity.isdigit() else 100
+            qr_opacity = max(0, min(100, qr_opacity))
+            
+            bg_opacity = request.form.get('bg_opacity', '100')
+            bg_opacity = int(bg_opacity) if bg_opacity.isdigit() else 100
+            bg_opacity = max(0, min(100, bg_opacity))
+            
+            width_inches = request.form.get('width_inches', '0')
+            width_inches = float(width_inches) if width_inches else 0
+            
+            height_inches = request.form.get('height_inches', '0')
+            height_inches = float(height_inches) if height_inches else 0
+            
+            dpi = request.form.get('dpi', '300')
+            dpi = int(dpi) if dpi.isdigit() else 300
+            dpi = max(72, min(1200, dpi))
+            
+            download_type = request.form.get('download_type', 'jpg')
+            
+            # Get tile_gap parameter
+            tile_gap = request.form.get('tile_gap', '0')
+            tile_gap = float(tile_gap) if tile_gap else 0
+            
+            print("Generating preview with parameters:")
+            print(f"num_cols: {num_cols}, num_rows: {num_rows}")
+            print(f"tile_size: {tile_size}, margin: {margin}, qr_padding: {qr_padding}")
+            print(f"width_inches: {width_inches}, height_inches: {height_inches}, dpi: {dpi}")
+            
+            # Check memory requirements for the full-size image
+            memory_validation = validate_memory_requirements(width_inches, height_inches, dpi, margin)
+            
+            result_path = generate_qr_mosaic(
+                image_path,
+                excel_path,
+                num_cols,
+                num_rows,
+                square_tiles,
+                tile_size,
+                margin,
+                qr_padding,
+                qr_opacity,
+                width_inches,
+                height_inches,
+                dpi,
+                bg_opacity,
+                preview=True,
+                download_type=download_type,
+                tile_gap=tile_gap
+            )
+            
+            # For preview, always return a JPEG/PNG base64 image
+            ext = os.path.splitext(result_path)[1].lower()
+            with open(result_path, 'rb') as img_file:
+                img_base64 = base64.b64encode(img_file.read()).decode('utf-8')
+            if ext == '.png':
+                mime = 'image/png'
+            else:
+                mime = 'image/jpeg'
+            return jsonify({
+                'preview': f'data:{mime};base64,{img_base64}',
+                'memory_info': memory_validation
+            })
+        except Exception as e:
+            print(f"Error in preview generation: {str(e)}")
+            import traceback
+            print(traceback.format_exc())
+            return jsonify({'error': str(e)}), 500
     except Exception as e:
+        print(f"Error in preview endpoint: {str(e)}")
+        import traceback
+        print(traceback.format_exc())
         return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
