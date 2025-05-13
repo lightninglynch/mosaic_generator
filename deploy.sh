@@ -26,7 +26,7 @@ Group=nginx
 WorkingDirectory=/home/ec2-user/mosaic_generator
 Environment="PATH=/home/ec2-user/mosaic_generator/venv/bin"
 Environment="PYTHONUNBUFFERED=1"
-ExecStart=/home/ec2-user/mosaic_generator/venv/bin/gunicorn --workers 3 --bind unix:/run/gunicorn/mosaic-generator.sock -m 007 wsgi:app --log-level debug
+ExecStart=/home/ec2-user/mosaic_generator/venv/bin/gunicorn --workers 3 --bind unix:/run/gunicorn/mosaic-generator.sock -m 007 wsgi:app --log-level debug --timeout 0
 Restart=always
 
 [Install]
@@ -83,10 +83,10 @@ server {
 
     # Increase timeout for large file uploads
     client_max_body_size 300M;
-    client_body_timeout 300s;
-    client_header_timeout 300s;
-    keepalive_timeout 300s;
-    send_timeout 300s;
+    client_body_timeout 3600s;
+    client_header_timeout 3600s;
+    keepalive_timeout 3600s;
+    send_timeout 3600s;
 
     location / {
         proxy_pass http://unix:/run/gunicorn/mosaic-generator.sock;
@@ -96,9 +96,9 @@ server {
         proxy_set_header X-Forwarded-Proto \$scheme;
         
         # Increase proxy timeouts
-        proxy_connect_timeout 300s;
-        proxy_send_timeout 300s;
-        proxy_read_timeout 300s;
+        proxy_connect_timeout 3600s;
+        proxy_send_timeout 3600s;
+        proxy_read_timeout 3600s;
     }
 
     location /static {
