@@ -110,8 +110,22 @@ def validate_memory_requirements(width_inches, height_inches, dpi, margin=0, max
         'max_memory_mb': max_memory_mb
     }
 
+def get_luminance(color):
+    r, g, b = color
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b
+
+def adjust_color_adaptive(color, shade_factor=0.8):
+    luminance = get_luminance(color)
+    if luminance < 128:
+        # Background is dark, lighten the QR code
+        factor = 1 + (1 - shade_factor)
+    else:
+        # Background is light, darken the QR code
+        factor = shade_factor
+    return tuple(max(0, min(255, int(c * factor))) for c in color)
+
 def generate_qr_mosaic(image_path, excel_path, num_cols, num_rows, square_tiles, tile_size, 
-                      margin=0, qr_opacity=100, width_inches=0, height_inches=0, dpi=300, bg_opacity=100, preview=False, download_type='jpg', tile_gap=0):
+                      margin=0, qr_opacity=100, width_inches=0, height_inches=0, dpi=300, bg_opacity=100, preview=False, download_type='jpg', tile_gap=0, qr_shade=0.8):
     # Load Excel data
     df = pd.read_excel(excel_path)
     
@@ -229,12 +243,13 @@ def generate_qr_mosaic(image_path, excel_path, num_cols, num_rows, square_tiles,
             try:
                 tile_x = col * current_tile_width
                 tile_y = row * current_tile_height
-                tile_center_x = tile_x + current_tile_width // 2
-                tile_center_y = tile_y + current_tile_height // 2
-                bg_color = pixelated.getpixel((tile_center_x, tile_center_y))
-                if len(bg_color) == 4:
-                    bg_color = bg_color[:3]
-                bg_color_hex = '#{:02x}{:02x}{:02x}'.format(*bg_color)
+                # Crop the region for this tile from the pixelated (blurred) background
+                region = pixelated.crop((tile_x, tile_y, tile_x + current_tile_width, tile_y + current_tile_height))
+                avg_color = region.resize((1, 1), resample=Image.LANCZOS).getpixel((0, 0))
+                if isinstance(avg_color, tuple) and len(avg_color) == 4:
+                    avg_color = avg_color[:3]
+                avg_color = adjust_color_adaptive(avg_color, qr_shade)
+                # Generate QR code with transparent background and avg_color foreground
                 qr = qrcode.QRCode(
                     version=1,
                     error_correction=qrcode.constants.ERROR_CORRECT_L,
@@ -243,16 +258,7 @@ def generate_qr_mosaic(image_path, excel_path, num_cols, num_rows, square_tiles,
                 )
                 qr.add_data(url)
                 qr.make(fit=True)
-                qr_img = qr.make_image(fill_color="black", back_color=bg_color_hex)
-                qr_img = qr_img.convert('RGBA')
-                data = qr_img.getdata()
-                new_data = []
-                for item in data:
-                    if item[0] < 10 and item[1] < 10 and item[2] < 10:
-                        new_data.append((0, 0, 0, 255))
-                    else:
-                        new_data.append((255, 255, 255, 0))
-                qr_img.putdata(new_data)
+                qr_img = qr.make_image(fill_color=avg_color, back_color=None).convert('RGBA')
             except Exception as e:
                 qr = qrcode.QRCode(
                     version=1,
@@ -262,22 +268,21 @@ def generate_qr_mosaic(image_path, excel_path, num_cols, num_rows, square_tiles,
                 )
                 qr.add_data(url)
                 qr.make(fit=True)
-                qr_img = qr.make_image(fill_color="black", back_color="white")
+                qr_img = qr.make_image(fill_color="black", back_color=None).convert('RGBA')
 
             # Resize QR code to fit within the tile with the gap
             qr_size = min(current_tile_width, current_tile_height) - (2 * gap)
             qr_size = max(qr_size, 1)
             qr_img = qr_img.resize((qr_size, qr_size), resample=Image.LANCZOS)
 
+            # Apply QR code opacity if less than 100%
+            if qr_opacity < 100:
+                alpha = qr_img.split()[3].point(lambda p: int(p * (qr_opacity / 100)))
+                qr_img.putalpha(alpha)
+
             # Calculate position to center the QR code in the tile (respecting gap)
             paste_x = margin + (col * current_tile_width) + gap + (current_tile_width - 2 * gap - qr_size) // 2
             paste_y = margin + (row * current_tile_height) + gap + (current_tile_height - 2 * gap - qr_size) // 2
-
-            # Apply QR code opacity if less than 100%
-            if qr_opacity < 100:
-                qr_bg = Image.new("RGBA", qr_img.size, (255, 255, 255, 0))
-                qr_mask = Image.new("L", qr_img.size, int(qr_opacity * 2.55))
-                qr_img = Image.composite(qr_img, qr_bg, qr_mask)
 
             # Paste the QR code onto the mosaic
             mosaic.paste(qr_img, (paste_x, paste_y), qr_img)
@@ -373,6 +378,9 @@ def index():
             tile_gap = request.form.get('tile_gap', '0')
             tile_gap = float(tile_gap) if tile_gap else 0
             
+            # Get qr_shade parameter
+            qr_shade = float(request.form.get('qr_shade', '0.8'))
+            
             result_path = generate_qr_mosaic(
                 image_path,
                 excel_path,
@@ -387,7 +395,8 @@ def index():
                 dpi,
                 bg_opacity,
                 download_type=download_type,
-                tile_gap=tile_gap
+                tile_gap=tile_gap,
+                qr_shade=qr_shade
             )
             session['result_path'] = result_path
             session['download_type'] = download_type
@@ -480,6 +489,9 @@ def preview():
             tile_gap = request.form.get('tile_gap', '0')
             tile_gap = float(tile_gap) if tile_gap else 0
             
+            # Get qr_shade parameter
+            qr_shade = float(request.form.get('qr_shade', '0.8'))
+            
             print("Generating preview with parameters:")
             print(f"num_cols: {num_cols}, num_rows: {num_rows}")
             print(f"tile_size: {tile_size}, margin: {margin}, qr_opacity: {qr_opacity}")
@@ -503,7 +515,8 @@ def preview():
                 bg_opacity,
                 preview=True,
                 download_type=download_type,
-                tile_gap=tile_gap
+                tile_gap=tile_gap,
+                qr_shade=qr_shade
             )
             
             # For preview, always return a JPEG/PNG base64 image
