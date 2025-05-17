@@ -115,6 +115,12 @@
                             <small class="form-text text-muted">Adjust how much lighter or darker the QR code is compared to the background (lower = darker, higher = lighter)</small>
                         </div>
                         
+                        <div class="mb-3">
+                            <label for="qr_saturation" class="form-label">QR Color Saturation: <span id="qr_saturation_value">1.0</span></label>
+                            <input type="range" class="form-range" id="qr_saturation" name="qr_saturation" min="0" max="2" step="0.01" value="1.0">
+                            <small class="form-text text-muted">Adjust how vivid or muted the QR code color is (0 = grayscale, 1 = normal, 2 = extra vivid)</small>
+                        </div>
+                        
                         <div class="mb-3 form-check">
                             <input type="checkbox" class="form-check-input" id="square_tiles" name="square_tiles">
                             <label class="form-check-label" for="square_tiles">Force Square Tiles</label>
@@ -468,6 +474,8 @@ document.addEventListener('DOMContentLoaded', function() {
     const bgOpacityValue = document.getElementById('bg_opacity_value');
     const qrShadeSlider = document.getElementById('qr_shade');
     const qrShadeValue = document.getElementById('qr_shade_value');
+    const qrSaturationSlider = document.getElementById('qr_saturation');
+    const qrSaturationValue = document.getElementById('qr_saturation_value');
 
     if (qrOpacitySlider && qrOpacityValue) {
         qrOpacitySlider.addEventListener('input', function() {
@@ -484,6 +492,12 @@ document.addEventListener('DOMContentLoaded', function() {
     if (qrShadeSlider && qrShadeValue) {
         qrShadeSlider.addEventListener('input', function() {
             qrShadeValue.textContent = this.value;
+        });
+    }
+
+    if (qrSaturationSlider && qrSaturationValue) {
+        qrSaturationSlider.addEventListener('input', function() {
+            qrSaturationValue.textContent = this.value;
         });
     }
 });

@@ -14,6 +14,7 @@ import schedule
 import time
 import threading
 from datetime import datetime, timedelta
+from colorsys import rgb_to_hls, hls_to_rgb
 
 app = Flask(__name__)
 app.config['UPLOAD_FOLDER'] = os.getenv('UPLOAD_FOLDER', 'static/uploads')
@@ -114,18 +115,19 @@ def get_luminance(color):
     r, g, b = color
     return 0.2126 * r + 0.7152 * g + 0.0722 * b
 
-def adjust_color_adaptive(color, shade_factor=0.8):
-    luminance = get_luminance(color)
-    if luminance < 128:
-        # Background is dark, lighten the QR code
-        factor = 1 + (1 - shade_factor)
-    else:
-        # Background is light, darken the QR code
-        factor = shade_factor
+def adjust_color_lighter(color, factor=1.2):
     return tuple(max(0, min(255, int(c * factor))) for c in color)
 
+def adjust_saturation(color, saturation=1.0):
+    # color: (r, g, b), values 0-255
+    r, g, b = [c / 255.0 for c in color]
+    h, l, s = rgb_to_hls(r, g, b)
+    s = max(0, min(1, s * saturation))
+    r, g, b = hls_to_rgb(h, l, s)
+    return (int(r * 255), int(g * 255), int(b * 255))
+
 def generate_qr_mosaic(image_path, excel_path, num_cols, num_rows, square_tiles, tile_size, 
-                      margin=0, qr_opacity=100, width_inches=0, height_inches=0, dpi=300, bg_opacity=100, preview=False, download_type='jpg', tile_gap=0, qr_shade=0.8):
+                      margin=0, qr_opacity=100, width_inches=0, height_inches=0, dpi=300, bg_opacity=100, preview=False, download_type='jpg', tile_gap=0, qr_shade=1.2, qr_saturation=1.0):
     # Load Excel data
     df = pd.read_excel(excel_path)
     
@@ -248,8 +250,12 @@ def generate_qr_mosaic(image_path, excel_path, num_cols, num_rows, square_tiles,
                 avg_color = region.resize((1, 1), resample=Image.LANCZOS).getpixel((0, 0))
                 if isinstance(avg_color, tuple) and len(avg_color) == 4:
                     avg_color = avg_color[:3]
-                avg_color = adjust_color_adaptive(avg_color, qr_shade)
-                # Generate QR code with transparent background and avg_color foreground
+                avg_color = adjust_color_lighter(avg_color, qr_shade)
+                avg_color = adjust_saturation(avg_color, qr_saturation)
+                # avg_color is the average color of the tile region (from pixelated)
+                module_color = adjust_color_lighter(avg_color, qr_shade)  # Make modules lighter
+                module_color = adjust_saturation(module_color, qr_saturation)  # Adjust saturation of modules
+                # Use avg_color as the QR code background (no shade/saturation adjustment)
                 qr = qrcode.QRCode(
                     version=1,
                     error_correction=qrcode.constants.ERROR_CORRECT_L,
@@ -258,7 +264,7 @@ def generate_qr_mosaic(image_path, excel_path, num_cols, num_rows, square_tiles,
                 )
                 qr.add_data(url)
                 qr.make(fit=True)
-                qr_img = qr.make_image(fill_color=avg_color, back_color=None).convert('RGBA')
+                qr_img = qr.make_image(fill_color=module_color, back_color=avg_color).convert('RGBA')
             except Exception as e:
                 qr = qrcode.QRCode(
                     version=1,
@@ -381,6 +387,9 @@ def index():
             # Get qr_shade parameter
             qr_shade = float(request.form.get('qr_shade', '0.8'))
             
+            # Get qr_saturation parameter
+            qr_saturation = float(request.form.get('qr_saturation', '1.0'))
+            
             result_path = generate_qr_mosaic(
                 image_path,
                 excel_path,
@@ -396,7 +405,8 @@ def index():
                 bg_opacity,
                 download_type=download_type,
                 tile_gap=tile_gap,
-                qr_shade=qr_shade
+                qr_shade=qr_shade,
+                qr_saturation=qr_saturation
             )
             session['result_path'] = result_path
             session['download_type'] = download_type
@@ -492,6 +502,9 @@ def preview():
             # Get qr_shade parameter
             qr_shade = float(request.form.get('qr_shade', '0.8'))
             
+            # Get qr_saturation parameter
+            qr_saturation = float(request.form.get('qr_saturation', '1.0'))
+            
             print("Generating preview with parameters:")
             print(f"num_cols: {num_cols}, num_rows: {num_rows}")
             print(f"tile_size: {tile_size}, margin: {margin}, qr_opacity: {qr_opacity}")
@@ -516,7 +529,8 @@ def preview():
                 preview=True,
                 download_type=download_type,
                 tile_gap=tile_gap,
-                qr_shade=qr_shade
+                qr_shade=qr_shade,
+                qr_saturation=qr_saturation
             )
             
             # For preview, always return a JPEG/PNG base64 image
