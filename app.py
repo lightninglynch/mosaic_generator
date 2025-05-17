@@ -250,12 +250,12 @@ def generate_qr_mosaic(image_path, excel_path, num_cols, num_rows, square_tiles,
                 avg_color = region.resize((1, 1), resample=Image.LANCZOS).getpixel((0, 0))
                 if isinstance(avg_color, tuple) and len(avg_color) == 4:
                     avg_color = avg_color[:3]
-                avg_color = adjust_color_lighter(avg_color, qr_shade)
-                avg_color = adjust_saturation(avg_color, qr_saturation)
-                # avg_color is the average color of the tile region (from pixelated)
-                module_color = adjust_color_lighter(avg_color, qr_shade)  # Make modules lighter
-                module_color = adjust_saturation(module_color, qr_saturation)  # Adjust saturation of modules
-                # Use avg_color as the QR code background (no shade/saturation adjustment)
+                
+                # Apply shade and saturation to the module color
+                module_color = adjust_color_lighter(avg_color, qr_shade)
+                module_color = adjust_saturation(module_color, qr_saturation)
+                
+                # Use the adjusted color for QR code modules and original color for background
                 qr = qrcode.QRCode(
                     version=1,
                     error_correction=qrcode.constants.ERROR_CORRECT_L,
