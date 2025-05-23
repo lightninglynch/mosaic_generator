@@ -15,6 +15,13 @@ import time
 import threading
 from datetime import datetime, timedelta
 from colorsys import rgb_to_hls, hls_to_rgb
+from qrcode.image.styledpil import StyledPilImage
+from qrcode.image.styles.moduledrawers import (
+    SquareModuleDrawer,
+    CircleModuleDrawer,
+    RoundedModuleDrawer,
+    GappedSquareModuleDrawer,
+)
 
 app = Flask(__name__)
 app.config['UPLOAD_FOLDER'] = os.getenv('UPLOAD_FOLDER', 'static/uploads')
@@ -116,7 +123,17 @@ def get_luminance(color):
     return 0.2126 * r + 0.7152 * g + 0.0722 * b
 
 def adjust_color_lighter(color, factor=1.2):
-    return tuple(max(0, min(255, int(c * factor))) for c in color)
+    # Get the luminance of the original color
+    luminance = get_luminance(color)
+    
+    # Adjust the factor based on luminance
+    # Darker colors get a higher factor to make them lighter
+    if luminance < 128:  # If color is dark
+        adjusted_factor = factor * (1 + (128 - luminance) / 128)
+    else:  # If color is light
+        adjusted_factor = factor
+    
+    return tuple(max(0, min(255, int(c * adjusted_factor))) for c in color)
 
 def adjust_saturation(color, saturation=1.0):
     # color: (r, g, b), values 0-255
@@ -125,6 +142,17 @@ def adjust_saturation(color, saturation=1.0):
     s = max(0, min(1, s * saturation))
     r, g, b = hls_to_rgb(h, l, s)
     return (int(r * 255), int(g * 255), int(b * 255))
+
+def get_qr_style(style_name):
+    """Get the QR code module drawer based on the selected style"""
+    styles = {
+        'default': SquareModuleDrawer(),  # Use SquareModuleDrawer for default style
+        'rounded': RoundedModuleDrawer(),
+        'circle': CircleModuleDrawer(),
+        'square': SquareModuleDrawer(),
+        'gapped': GappedSquareModuleDrawer(),
+    }
+    return styles.get(style_name, SquareModuleDrawer())  # Default to SquareModuleDrawer if style not found
 
 def generate_qr_mosaic(image_path, excel_path, num_cols, num_rows, square_tiles, tile_size, 
                       margin=0, qr_opacity=100, width_inches=0, height_inches=0, dpi=300, bg_opacity=100, preview=False, download_type='jpg', tile_gap=0, qr_shade=1.2, qr_saturation=1.0):
@@ -251,11 +279,23 @@ def generate_qr_mosaic(image_path, excel_path, num_cols, num_rows, square_tiles,
                 if isinstance(avg_color, tuple) and len(avg_color) == 4:
                     avg_color = avg_color[:3]
                 
-                # Apply shade and saturation to the module color
-                module_color = adjust_color_lighter(avg_color, qr_shade)
-                module_color = adjust_saturation(module_color, qr_saturation)
+                # Calculate luminance of the original color
+                luminance = get_luminance(avg_color)
                 
-                # Use the adjusted color for QR code modules and original color for background
+                # Apply shade and saturation to get the adjusted color
+                adjusted_color = adjust_color_lighter(avg_color, qr_shade)
+                adjusted_color = adjust_saturation(adjusted_color, qr_saturation)
+                
+                # For light colors, use original color for QR code and adjusted for background
+                # For dark colors, use adjusted color for QR code and original for background
+                if luminance >= 128:  # Light color
+                    qr_color = avg_color
+                    bg_color = adjusted_color
+                else:  # Dark color
+                    qr_color = adjusted_color
+                    bg_color = avg_color
+                
+                # Generate QR code with the selected colors
                 qr = qrcode.QRCode(
                     version=1,
                     error_correction=qrcode.constants.ERROR_CORRECT_L,
@@ -264,7 +304,7 @@ def generate_qr_mosaic(image_path, excel_path, num_cols, num_rows, square_tiles,
                 )
                 qr.add_data(url)
                 qr.make(fit=True)
-                qr_img = qr.make_image(fill_color=module_color, back_color=avg_color).convert('RGBA')
+                qr_img = qr.make_image(fill_color=qr_color, back_color=bg_color).convert('RGBA')
             except Exception as e:
                 qr = qrcode.QRCode(
                     version=1,
@@ -418,18 +458,28 @@ def index():
 
 @app.route('/download')
 def download():
-    result_path = session.get('result_path', os.path.join(app.config['UPLOAD_FOLDER'], 'result.jpg'))
+    result_path = session.get('result_path')
     download_type = session.get('download_type', 'jpg')
-    if download_type == 'png':
-        mimetype = 'image/png'
-        filename = 'qr_mosaic.png'
-    elif download_type == 'pdf':
-        mimetype = 'application/pdf'
-        filename = 'qr_mosaic.pdf'
-    else:
-        mimetype = 'image/jpeg'
-        filename = 'qr_mosaic.jpg'
-    return send_file(result_path, as_attachment=True, download_name=filename, mimetype=mimetype)
+    
+    if not result_path or not os.path.exists(result_path):
+        return "File not found", 404
+    
+    try:
+        if download_type == 'pdf':
+            # Convert image to PDF
+            img = Image.open(result_path)
+            if img.mode != 'RGB':
+                img = img.convert('RGB')
+            pdf_path = os.path.join(app.config['UPLOAD_FOLDER'], 'result.pdf')
+            img.save(pdf_path, 'PDF', resolution=300)
+            return send_file(pdf_path, as_attachment=True, download_name='qr_mosaic.pdf', mimetype='application/pdf')
+        elif download_type == 'png':
+            return send_file(result_path, as_attachment=True, download_name='qr_mosaic.png', mimetype='image/png')
+        else:  # jpg
+            return send_file(result_path, as_attachment=True, download_name='qr_mosaic.jpg', mimetype='image/jpeg')
+    except Exception as e:
+        print(f"Error in download: {str(e)}")
+        return str(e), 500
 
 @app.route('/health')
 def health_check():
