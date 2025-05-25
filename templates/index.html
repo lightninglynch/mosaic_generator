@@ -126,18 +126,15 @@
                             <label class="form-check-label" for="square_tiles">Force Square Tiles</label>
                         </div>
                         
-                        <div class="mb-3">
-                            <label for="download_type" class="form-label">Download Type</label>
-                            <select class="form-control" id="download_type" name="download_type">
-                                <option value="jpg">JPEG (.jpg)</option>
-                                <option value="png">PNG (.png)</option>
-                                <option value="pdf">PDF (.pdf)</option>
-                            </select>
-                        </div>
-                        
                         <div class="form-group d-flex gap-2">
                             <button type="button" class="btn btn-secondary" id="preview-button">
                                 <span class="button-text">Generate Preview</span>
+                                <div class="spinner-border spinner-border-sm d-none" role="status">
+                                    <span class="visually-hidden">Loading...</span>
+                                </div>
+                            </button>
+                            <button type="submit" class="btn btn-primary" id="generate-button">
+                                <span class="button-text">Generate Download</span>
                                 <div class="spinner-border spinner-border-sm d-none" role="status">
                                     <span class="visually-hidden">Loading...</span>
                                 </div>
@@ -185,6 +182,55 @@
 </div>
 
 <script>
+// Move handleDownload to global scope
+function handleDownload(event) {
+    event.preventDefault();
+    const downloadLink = event.target;
+    const downloadFormat = document.getElementById('download-format').value;
+    
+    // Show loading state
+    const originalText = downloadLink.textContent;
+    downloadLink.textContent = 'Downloading...';
+    downloadLink.disabled = true;
+    
+    fetch('/download', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: `download_type=${downloadFormat}`,
+        credentials: 'same-origin'  // Important for session handling
+    })
+        .then(response => {
+            if (!response.ok) {
+                return response.text().then(text => {
+                    throw new Error(text || 'Download failed');
+                });
+            }
+            return response.blob();
+        })
+        .then(blob => {
+            // Create a temporary link to trigger the download
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'qr_mosaic.' + downloadFormat;
+            document.body.appendChild(a);
+            a.click();
+            window.URL.revokeObjectURL(url);
+            document.body.removeChild(a);
+        })
+        .catch(error => {
+            console.error('Download error:', error);
+            alert('Error downloading file: ' + error.message);
+        })
+        .finally(() => {
+            // Restore button state
+            downloadLink.textContent = originalText;
+            downloadLink.disabled = false;
+        });
+}
+
 document.addEventListener('DOMContentLoaded', function() {
     // Debug logging to check if elements exist
     console.log('Checking required elements:');
@@ -408,64 +454,124 @@ document.addEventListener('DOMContentLoaded', function() {
         previewButton.addEventListener('click', updatePreview);
     }
     
-    function handleFormSubmit(e) {
-        e.preventDefault();
-        
-        // Don't submit if preview is still loading
-        if (isPreviewLoading) {
+    const generateButton = document.getElementById('generate-button');
+    const generateButtonText = generateButton?.querySelector('.button-text');
+    const generateButtonSpinner = generateButton?.querySelector('.spinner-border');
+
+    function setGenerateButtonState(isLoading) {
+        if (!generateButton || !generateButtonText || !generateButtonSpinner) {
+            console.error('Generate button elements not found');
             return;
         }
         
-        // Show loading overlay
+        generateButton.disabled = isLoading;
+        generateButtonText.textContent = isLoading ? 'Generating...' : 'Generate Mosaic';
+        generateButtonSpinner.classList.toggle('d-none', !isLoading);
+    }
+
+    function handleFormSubmit(e) {
+        e.preventDefault();
+        console.log('Form submission started');
+        
+        // Don't submit if preview is still loading
+        if (isPreviewLoading) {
+            console.log('Preview is still loading, preventing form submission');
+            return;
+        }
+        
+        // Show loading overlay and button state
         if (loadingOverlay) {
             loadingOverlay.style.display = 'block';
         }
+        setGenerateButtonState(true);
         
         // Update pixel values before submission
         updatePixelValues();
         
         const formData = new FormData(form);
         
+        // Log form data
+        console.log('Submitting form data:');
+        for (let pair of formData.entries()) {
+            console.log(pair[0] + ': ' + pair[1]);
+        }
+        
         fetch('/', {
             method: 'POST',
-            body: formData
+            body: formData,
+            credentials: 'same-origin'  // Important for session handling
         })
         .then(response => {
+            console.log('Response status:', response.status);
             if (response.ok) {
-                // Instead of reloading, show the download button
-                const successAlert = document.createElement('div');
-                successAlert.className = 'alert alert-success mt-3';
-                successAlert.innerHTML = `
-                    Mosaic generated successfully!
-                    <a href="/download" class="btn btn-primary ms-3">Download Result</a>
-                `;
-                if (form && form.parentNode) {
-                    form.parentNode.insertBefore(successAlert, form.nextSibling);
-                }
-                if (loadingOverlay) {
-                    loadingOverlay.style.display = 'none';
-                }
+                return response.text().then(html => {
+                    console.log('Received HTML response');
+                    // Remove any existing success/error alerts
+                    const existingAlerts = form.parentNode.querySelectorAll('.alert');
+                    existingAlerts.forEach(alert => alert.remove());
+                    
+                    // Create success alert with download button
+                    const successAlert = document.createElement('div');
+                    successAlert.className = 'alert alert-success mt-3';
+                    successAlert.innerHTML = `
+                        Mosaic generated successfully!
+                        <div class="d-flex align-items-center mt-2">
+                            <select class="form-select me-2" style="width: auto;" id="download-format">
+                                <option value="jpg">JPEG (.jpg)</option>
+                                <option value="png">PNG (.png)</option>
+                                <option value="pdf">PDF (.pdf)</option>
+                            </select>
+                            <a href="#" class="btn btn-primary" onclick="handleDownload(event)">Download Result</a>
+                        </div>
+                    `;
+                    
+                    // Insert the alert after the form
+                    if (form && form.parentNode) {
+                        form.parentNode.insertBefore(successAlert, form.nextSibling);
+                        console.log('Success alert with download button added');
+                    } else {
+                        console.error('Could not find form parent node to insert alert');
+                    }
+                });
             } else {
-                throw new Error('Network response was not ok');
+                return response.text().then(text => {
+                    console.error('Server error response:', text);
+                    throw new Error(text || 'Network response was not ok');
+                });
             }
         })
         .catch(error => {
-            console.error('Error:', error);
+            console.error('Error during form submission:', error);
+            // Remove any existing success/error alerts
+            const existingAlerts = form.parentNode.querySelectorAll('.alert');
+            existingAlerts.forEach(alert => alert.remove());
+            
+            // Create error alert
+            const errorAlert = document.createElement('div');
+            errorAlert.className = 'alert alert-danger mt-3';
+            errorAlert.textContent = error.message || 'An error occurred while generating the mosaic. Please try again.';
+            
+            // Insert the error alert after the form
+            if (form && form.parentNode) {
+                form.parentNode.insertBefore(errorAlert, form.nextSibling);
+                console.log('Error alert added');
+            } else {
+                console.error('Could not find form parent node to insert error alert');
+            }
+        })
+        .finally(() => {
+            console.log('Form submission completed');
             if (loadingOverlay) {
                 loadingOverlay.style.display = 'none';
             }
-            alert('An error occurred while generating the mosaic. Please try again.');
+            setGenerateButtonState(false);
         });
     }
     
-    function initializeForm() {
-        if (form) {
-            form.addEventListener('submit', handleFormSubmit);
-        }
-    }
-    
     // Initialize the form
-    initializeForm();
+    if (form) {
+        form.addEventListener('submit', handleFormSubmit);
+    }
 
     // Add event listeners for opacity sliders
     const qrOpacitySlider = document.getElementById('qr_opacity');

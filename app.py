@@ -26,6 +26,7 @@ from qrcode.image.styles.moduledrawers import (
 app = Flask(__name__)
 app.config['UPLOAD_FOLDER'] = os.getenv('UPLOAD_FOLDER', 'static/uploads')
 app.config['MAX_CONTENT_LENGTH'] = int(os.getenv('MAX_CONTENT_LENGTH', 16 * 1024 * 1024))
+app.secret_key = os.urandom(24)  # Add a secret key for session management
 
 # Ensure upload folder exists
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
@@ -338,10 +339,22 @@ def generate_qr_mosaic(image_path, excel_path, num_cols, num_rows, square_tiles,
         result_path = os.path.join(app.config['UPLOAD_FOLDER'], 'result.png')
         mosaic.save(result_path, 'PNG', dpi=(dpi, dpi))
     elif download_type == 'pdf':
+        # For PDF, save as PNG first
+        temp_png = os.path.join(app.config['UPLOAD_FOLDER'], 'temp_result.png')
+        mosaic.save(temp_png, 'PNG', dpi=(dpi, dpi))
+        
+        # Convert PNG to PDF
         result_path = os.path.join(app.config['UPLOAD_FOLDER'], 'result.pdf')
-        if mosaic.mode != 'RGB':
-            mosaic = mosaic.convert('RGB')
-        mosaic.save(result_path, 'PDF', resolution=dpi)
+        img = Image.open(temp_png)
+        if img.mode != 'RGB':
+            img = img.convert('RGB')
+        img.save(result_path, 'PDF', resolution=dpi)
+        
+        # Clean up temporary PNG file
+        try:
+            os.remove(temp_png)
+        except:
+            pass
     else:
         result_path = os.path.join(app.config['UPLOAD_FOLDER'], 'result.jpg')
         mosaic.save(result_path, 'JPEG', quality=95, dpi=(dpi, dpi))
@@ -386,14 +399,14 @@ def index():
         image_file.save(image_path)
         excel_file.save(excel_path)
         
-        # Get form parameters
-        num_cols = int(request.form.get('num_cols', 20))
-        num_rows = int(request.form.get('num_rows', 20))
-        square_tiles = 'square_tiles' in request.form
-        tile_size = request.form.get('tile_size_pixels')
-        tile_size = float(tile_size) if tile_size and tile_size.replace('.', '').isdigit() else None
-        
         try:
+            # Get form parameters
+            num_cols = int(request.form.get('num_cols', 20))
+            num_rows = int(request.form.get('num_rows', 20))
+            square_tiles = 'square_tiles' in request.form
+            tile_size = request.form.get('tile_size_pixels')
+            tile_size = float(tile_size) if tile_size and tile_size.replace('.', '').isdigit() else None
+            
             # Get pixel values instead of direct inputs
             margin = request.form.get('margin_pixels')
             margin = float(margin) if margin and margin.replace('.', '').isdigit() else 0
@@ -430,6 +443,11 @@ def index():
             # Get qr_saturation parameter
             qr_saturation = float(request.form.get('qr_saturation', '1.0'))
             
+            print("Generating mosaic with parameters:")
+            print(f"num_cols: {num_cols}, num_rows: {num_rows}")
+            print(f"tile_size: {tile_size}, margin: {margin}, qr_opacity: {qr_opacity}")
+            print(f"width_inches: {width_inches}, height_inches: {height_inches}, dpi: {dpi}")
+            
             result_path = generate_qr_mosaic(
                 image_path,
                 excel_path,
@@ -448,42 +466,22 @@ def index():
                 qr_shade=qr_shade,
                 qr_saturation=qr_saturation
             )
+            
+            # Store the result path and download type in session
             session['result_path'] = result_path
             session['download_type'] = download_type
+            
+            print(f"Mosaic generated successfully. Result path: {result_path}")
+            print(f"Session data: {dict(session)}")
+            
             return render_template('index.html', result=True)
         except Exception as e:
+            print(f"Error generating mosaic: {str(e)}")
+            import traceback
+            print(traceback.format_exc())
             return render_template('index.html', error=str(e))
     
     return render_template('index.html')
-
-@app.route('/download')
-def download():
-    result_path = session.get('result_path')
-    download_type = session.get('download_type', 'jpg')
-    
-    if not result_path or not os.path.exists(result_path):
-        return "File not found", 404
-    
-    try:
-        if download_type == 'pdf':
-            # Convert image to PDF
-            img = Image.open(result_path)
-            if img.mode != 'RGB':
-                img = img.convert('RGB')
-            pdf_path = os.path.join(app.config['UPLOAD_FOLDER'], 'result.pdf')
-            img.save(pdf_path, 'PDF', resolution=300)
-            return send_file(pdf_path, as_attachment=True, download_name='qr_mosaic.pdf', mimetype='application/pdf')
-        elif download_type == 'png':
-            return send_file(result_path, as_attachment=True, download_name='qr_mosaic.png', mimetype='image/png')
-        else:  # jpg
-            return send_file(result_path, as_attachment=True, download_name='qr_mosaic.jpg', mimetype='image/jpeg')
-    except Exception as e:
-        print(f"Error in download: {str(e)}")
-        return str(e), 500
-
-@app.route('/health')
-def health_check():
-    return {'status': 'healthy'}, 200
 
 @app.route('/preview', methods=['POST'])
 def preview():
@@ -543,7 +541,8 @@ def preview():
             dpi = int(dpi) if dpi.isdigit() else 300
             dpi = max(72, min(1200, dpi))
             
-            download_type = request.form.get('download_type', 'jpg')
+            # For preview, always use PNG format
+            download_type = 'png'
             
             # Get tile_gap parameter
             tile_gap = request.form.get('tile_gap', '0')
@@ -583,16 +582,11 @@ def preview():
                 qr_saturation=qr_saturation
             )
             
-            # For preview, always return a JPEG/PNG base64 image
-            ext = os.path.splitext(result_path)[1].lower()
+            # For preview, always return a PNG base64 image
             with open(result_path, 'rb') as img_file:
                 img_base64 = base64.b64encode(img_file.read()).decode('utf-8')
-            if ext == '.png':
-                mime = 'image/png'
-            else:
-                mime = 'image/jpeg'
             return jsonify({
-                'preview': f'data:{mime};base64,{img_base64}',
+                'preview': f'data:image/png;base64,{img_base64}',
                 'memory_info': memory_validation
             })
         except Exception as e:
@@ -605,6 +599,65 @@ def preview():
         import traceback
         print(traceback.format_exc())
         return jsonify({'error': str(e)}), 500
+
+@app.route('/download', methods=['POST'])
+def download():
+    result_path = session.get('result_path')
+    download_type = request.form.get('download_type', 'jpg')
+    
+    print(f"Download request - Session data: {dict(session)}")  # Debug print
+    print(f"Download type requested: {download_type}")  # Debug print
+    
+    if not result_path:
+        print("No result_path in session")  # Debug print
+        return "No file path found in session. Please generate the mosaic again.", 404
+    
+    if not os.path.exists(result_path):
+        print(f"File not found at path: {result_path}")  # Debug print
+        return "Generated file not found. Please generate the mosaic again.", 404
+    
+    try:
+        # Get the file extension based on download type
+        if download_type == 'pdf':
+            # For PDF, we need to ensure it's a valid PDF file
+            if not result_path.endswith('.pdf'):
+                # Convert the image to PDF
+                img = Image.open(result_path)
+                if img.mode != 'RGB':
+                    img = img.convert('RGB')
+                pdf_path = os.path.join(app.config['UPLOAD_FOLDER'], 'result.pdf')
+                img.save(pdf_path, 'PDF', resolution=300)
+                result_path = pdf_path
+            
+            return send_file(
+                result_path,
+                as_attachment=True,
+                download_name='qr_mosaic.pdf',
+                mimetype='application/pdf'
+            )
+        elif download_type == 'png':
+            return send_file(
+                result_path,
+                as_attachment=True,
+                download_name='qr_mosaic.png',
+                mimetype='image/png'
+            )
+        else:  # jpg
+            return send_file(
+                result_path,
+                as_attachment=True,
+                download_name='qr_mosaic.jpg',
+                mimetype='image/jpeg'
+            )
+    except Exception as e:
+        print(f"Error in download: {str(e)}")
+        import traceback
+        print(traceback.format_exc())  # Print full traceback for debugging
+        return f"Error downloading file: {str(e)}", 500
+
+@app.route('/health')
+def health_check():
+    return {'status': 'healthy'}, 200
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=8000, debug=True) 
