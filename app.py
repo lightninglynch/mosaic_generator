@@ -26,7 +26,9 @@ from qrcode.image.styles.moduledrawers import (
 app = Flask(__name__)
 app.config['UPLOAD_FOLDER'] = os.getenv('UPLOAD_FOLDER', 'static/uploads')
 app.config['MAX_CONTENT_LENGTH'] = int(os.getenv('MAX_CONTENT_LENGTH', 16 * 1024 * 1024))
-app.secret_key = os.urandom(24)  # Add a secret key for session management
+app.secret_key = os.getenv('FLASK_SECRET_KEY', 'your-secret-key-here')  # Change this in production
+app.config['SESSION_TYPE'] = 'filesystem'
+app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=1)  # Session expires after 1 hour
 
 # Ensure upload folder exists
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
@@ -370,6 +372,7 @@ def index():
         print("Files in request:", list(request.files.keys()))
         print("Image file present:", 'image' in request.files)
         print("Excel file present:", 'excel' in request.files)
+        print("Current session data:", dict(session))  # Debug print
         
         if 'image' not in request.files or 'excel' not in request.files:
             error_msg = f"Missing files. Image: {'image' in request.files}, Excel: {'excel' in request.files}"
@@ -461,18 +464,18 @@ def index():
                 height_inches,
                 dpi,
                 bg_opacity,
-                download_type=download_type,
+                download_type='png',  # Always generate PNG for storage
                 tile_gap=tile_gap,
                 qr_shade=qr_shade,
                 qr_saturation=qr_saturation
             )
             
-            # Store the result path and download type in session
+            # Store the result path in session
             session['result_path'] = result_path
-            session['download_type'] = download_type
+            session.permanent = True  # Make the session persistent
             
             print(f"Mosaic generated successfully. Result path: {result_path}")
-            print(f"Session data: {dict(session)}")
+            print(f"Session data after generation: {dict(session)}")  # Debug print
             
             return render_template('index.html', result=True)
         except Exception as e:
@@ -607,6 +610,7 @@ def download():
     
     print(f"Download request - Session data: {dict(session)}")  # Debug print
     print(f"Download type requested: {download_type}")  # Debug print
+    print(f"Result path from session: {result_path}")  # Debug print
     
     if not result_path:
         print("No result_path in session")  # Debug print

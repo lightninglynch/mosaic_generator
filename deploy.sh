@@ -26,6 +26,7 @@ Group=nginx
 WorkingDirectory=/home/ec2-user/mosaic_generator
 Environment="PATH=/home/ec2-user/mosaic_generator/venv/bin"
 Environment="PYTHONUNBUFFERED=1"
+Environment="FLASK_SECRET_KEY=$(openssl rand -hex 32)"
 ExecStart=/home/ec2-user/mosaic_generator/venv/bin/gunicorn --workers 3 --bind unix:/run/gunicorn/mosaic-generator.sock -m 007 wsgi:app --log-level debug --timeout 0
 Restart=always
 
