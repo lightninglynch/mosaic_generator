@@ -22,6 +22,7 @@ from qrcode.image.styles.moduledrawers import (
     RoundedModuleDrawer,
     GappedSquareModuleDrawer,
 )
+import numpy as np
 
 app = Flask(__name__)
 app.config['UPLOAD_FOLDER'] = os.getenv('UPLOAD_FOLDER', 'static/uploads')
@@ -239,7 +240,7 @@ def generate_qr_mosaic(image_path, excel_path, num_cols, num_rows, square_tiles,
     # Create mosaic with margin
     final_width = mosaic_width + (2 * margin)
     final_height = mosaic_height + (2 * margin)
-    mosaic = Image.new("RGB", (final_width, final_height), "white")
+    mosaic = Image.new("RGBA", (final_width, final_height), (255, 255, 255, 0))
 
     # Create a pixelated version of the base image for color sampling (before opacity)
     pixelated_for_color = base_image.resize((num_cols, num_rows), resample=Image.NEAREST)
@@ -280,9 +281,9 @@ def generate_qr_mosaic(image_path, excel_path, num_cols, num_rows, square_tiles,
             region_for_color = pixelated_for_color.crop((tile_x, tile_y, tile_x + current_tile_width, tile_y + current_tile_height))
             avg_color = region_for_color.resize((1, 1), resample=Image.LANCZOS).getpixel((0, 0))
 
-            # Use the average color for the QR code, white for the background
+            # Use the average color for the QR code, transparent for the background
             qr_color = adjust_saturation(adjust_color_lighter(avg_color, 1), 1)
-            bg_color = (255, 255, 255)
+            bg_color = (255, 255, 255, 0)  # Fully transparent
 
             # Generate QR code with the selected colors
             qr = qrcode.QRCode(
@@ -300,10 +301,12 @@ def generate_qr_mosaic(image_path, excel_path, num_cols, num_rows, square_tiles,
             qr_size = max(qr_size, 1)
             qr_img = qr_img.resize((qr_size, qr_size), resample=Image.LANCZOS)
 
-            # Apply QR code opacity if less than 100%
-            if qr_opacity < 100:
-                alpha = qr_img.split()[3].point(lambda p: int(p * (qr_opacity / 100)))
-                qr_img.putalpha(alpha)
+            # Set all nearly white pixels (e.g., RGB > 240) to fully transparent to remove any faint white border/quiet zone around the QR code.
+            arr = np.array(qr_img)
+            threshold = 240
+            near_white_mask = (arr[..., 0:3] > threshold).all(axis=-1)
+            arr[..., 3][near_white_mask] = 0
+            qr_img = Image.fromarray(arr, 'RGBA')
 
             # Calculate position to center the QR code in the tile (respecting gap)
             paste_x = margin + (col * current_tile_width) + gap + (current_tile_width - 2 * gap - qr_size) // 2
