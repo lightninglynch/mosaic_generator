@@ -289,14 +289,9 @@ def generate_qr_mosaic(image_path, excel_path, num_cols, num_rows, square_tiles,
                 adjusted_color = adjust_color_lighter(avg_color, qr_shade)
                 adjusted_color = adjust_saturation(adjusted_color, qr_saturation)
                 
-                # For light colors, use original color for QR code and adjusted for background
-                # For dark colors, use adjusted color for QR code and original for background
-                if luminance >= 128:  # Light color
-                    qr_color = avg_color
-                    bg_color = adjusted_color
-                else:  # Dark color
-                    qr_color = adjusted_color
-                    bg_color = avg_color
+                # Use the average color for the QR code, white for the background
+                qr_color = avg_color
+                bg_color = (255, 255, 255)
                 
                 # Generate QR code with the selected colors
                 qr = qrcode.QRCode(
