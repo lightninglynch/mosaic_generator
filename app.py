@@ -241,10 +241,10 @@ def generate_qr_mosaic(image_path, excel_path, num_cols, num_rows, square_tiles,
     final_height = mosaic_height + (2 * margin)
     mosaic = Image.new("RGB", (final_width, final_height), "white")
 
-    # Create a pixelated version of the base image
-    small_size = (num_cols, num_rows)
-    pixelated = base_image.resize(small_size, resample=Image.NEAREST)
-    pixelated = pixelated.resize((mosaic_width, mosaic_height), resample=Image.NEAREST)
+    # Create a pixelated version of the base image for color sampling (before opacity)
+    pixelated_for_color = base_image.resize((num_cols, num_rows), resample=Image.NEAREST)
+    pixelated_for_color = pixelated_for_color.resize((mosaic_width, mosaic_height), resample=Image.NEAREST)
+    pixelated = pixelated_for_color.copy()
     pixelated = pixelated.filter(ImageFilter.GaussianBlur(radius=5))
 
     # Apply background opacity if less than 100%
@@ -259,6 +259,8 @@ def generate_qr_mosaic(image_path, excel_path, num_cols, num_rows, square_tiles,
 
     # Now overlay the QR codes
     link_index = 0
+    if not gap or gap < 2:
+        gap = 2
     for row in range(num_rows):
         for col in range(num_cols):
             if tile_size is not None:
@@ -272,47 +274,26 @@ def generate_qr_mosaic(image_path, excel_path, num_cols, num_rows, square_tiles,
             url = df.iloc[link_index % len(df)]["URL"]
             link_index += 1
 
-            # Get the background color for this tile
-            try:
-                tile_x = col * current_tile_width
-                tile_y = row * current_tile_height
-                # Crop the region for this tile from the pixelated (blurred) background
-                region = pixelated.crop((tile_x, tile_y, tile_x + current_tile_width, tile_y + current_tile_height))
-                avg_color = region.resize((1, 1), resample=Image.LANCZOS).getpixel((0, 0))
-                if isinstance(avg_color, tuple) and len(avg_color) == 4:
-                    avg_color = avg_color[:3]
-                
-                # Calculate luminance of the original color
-                luminance = get_luminance(avg_color)
-                
-                # Apply shade and saturation to get the adjusted color
-                adjusted_color = adjust_color_lighter(avg_color, qr_shade)
-                adjusted_color = adjust_saturation(adjusted_color, qr_saturation)
-                
-                # Use the average color for the QR code, white for the background
-                qr_color = avg_color
-                bg_color = (255, 255, 255)
-                
-                # Generate QR code with the selected colors
-                qr = qrcode.QRCode(
-                    version=1,
-                    error_correction=qrcode.constants.ERROR_CORRECT_L,
-                    box_size=10,
-                    border=0,
-                )
-                qr.add_data(url)
-                qr.make(fit=True)
-                qr_img = qr.make_image(fill_color=qr_color, back_color=bg_color).convert('RGBA')
-            except Exception as e:
-                qr = qrcode.QRCode(
-                    version=1,
-                    error_correction=qrcode.constants.ERROR_CORRECT_L,
-                    box_size=10,
-                    border=0,
-                )
-                qr.add_data(url)
-                qr.make(fit=True)
-                qr_img = qr.make_image(fill_color="black", back_color=None).convert('RGBA')
+            tile_x = col * current_tile_width
+            tile_y = row * current_tile_height
+            # Always sample color from the original pixelated image (before opacity)
+            region_for_color = pixelated_for_color.crop((tile_x, tile_y, tile_x + current_tile_width, tile_y + current_tile_height))
+            avg_color = region_for_color.resize((1, 1), resample=Image.LANCZOS).getpixel((0, 0))
+
+            # Use the average color for the QR code, white for the background
+            qr_color = adjust_saturation(adjust_color_lighter(avg_color, 1), 1)
+            bg_color = (255, 255, 255)
+
+            # Generate QR code with the selected colors
+            qr = qrcode.QRCode(
+                version=1,
+                error_correction=qrcode.constants.ERROR_CORRECT_L,
+                box_size=10,
+                border=0,
+            )
+            qr.add_data(url)
+            qr.make(fit=True)
+            qr_img = qr.make_image(fill_color=qr_color, back_color=bg_color).convert('RGBA')
 
             # Resize QR code to fit within the tile with the gap
             qr_size = min(current_tile_width, current_tile_height) - (2 * gap)
