@@ -33,11 +33,13 @@
                     <form method="POST" enctype="multipart/form-data" id="mosaic-form">
                         <div class="mb-3">
                             <label for="image" class="form-label">Base Image</label>
+                            <div class="form-text">Select an image to use as the base for the mosaic.</div>
                             <input type="file" class="form-control" id="image" name="image" accept="image/*" required>
                         </div>
                         
                         <div class="mb-3">
                             <label for="excel" class="form-label">Excel File (with URL column)</label>
+                            <div class="form-text">Select an Excel file containing URLs.</div>
                             <input type="file" class="form-control" id="excel" name="excel" accept=".xlsx,.xls" required>
                         </div>
                         
@@ -45,12 +47,14 @@
                             <div class="col-md-6">
                                 <div class="mb-3">
                                     <label for="num_cols" class="form-label">Number of Columns</label>
+                                    <div class="form-text">Enter the number of columns in the mosaic.</div>
                                     <input type="number" class="form-control" id="num_cols" name="num_cols" value="20" min="1" required>
                                 </div>
                             </div>
                             <div class="col-md-6">
                                 <div class="mb-3">
                                     <label for="num_rows" class="form-label">Number of Rows</label>
+                                    <div class="form-text">Enter the number of rows in the mosaic.</div>
                                     <input type="number" class="form-control" id="num_rows" name="num_rows" value="20" min="1" required>
                                 </div>
                             </div>
@@ -60,71 +64,72 @@
                             <div class="col-md-4">
                                 <div class="mb-3">
                                     <label for="width_inches" class="form-label">Width (inches)</label>
+                                    <div class="form-text">Enter the width of the mosaic in inches.</div>
                                     <input type="number" class="form-control" id="width_inches" name="width_inches" value="0" min="0" step="0.1">
-                                    <div class="form-text">Leave as 0 to use original size</div>
                                 </div>
                             </div>
                             <div class="col-md-4">
                                 <div class="mb-3">
                                     <label for="height_inches" class="form-label">Height (inches)</label>
+                                    <div class="form-text">Enter the height of the mosaic in inches.</div>
                                     <input type="number" class="form-control" id="height_inches" name="height_inches" value="0" min="0" step="0.1">
-                                    <div class="form-text">Leave as 0 to use original size</div>
                                 </div>
                             </div>
                             <div class="col-md-4">
                                 <div class="mb-3">
                                     <label for="dpi" class="form-label">DPI (dots per inch)</label>
+                                    <div class="form-text">Enter the DPI for the printed output.</div>
                                     <input type="number" class="form-control" id="dpi" name="dpi" value="300" min="72" max="1200">
-                                    <div class="form-text">Print quality (300 recommended)</div>
                                 </div>
                             </div>
                         </div>
                         
                         <div class="mb-3">
+                            <label for="outside_margin" class="form-label">Outside Margin (inches)</label>
+                            <div class="form-text">Extra white space around the entire mosaic for printing/bleed.</div>
+                            <input type="number" class="form-control" id="outside_margin" name="outside_margin" value="0.25" min="0" step="0.01">
+                        </div>
+                        
+                        <div class="mb-3">
                             <label for="tile_size" class="form-label">Tile Size (inches)</label>
+                            <div class="form-text">Enter the size of each QR code tile in inches.</div>
                             <input type="number" class="form-control" id="tile_size" name="tile_size" min="0.1" step="0.1">
-                            <div class="form-text">Size of each QR code tile</div>
                         </div>
                         
                         <div class="mb-3">
                             <label for="tile_gap" class="form-label">Tile Gap (inches)</label>
+                            <div class="form-text">Enter the gap between QR code tiles in inches.</div>
                             <input type="number" class="form-control" id="tile_gap" name="tile_gap" value="0" min="0" step="0.01">
-                            <div class="form-text">Visible gap between QR code tiles</div>
                         </div>
                         
                         <div class="row">
                             <div class="col-md-6">
                                 <div class="mb-3">
                                     <label for="qr_opacity" class="form-label">QR Opacity: <span id="qr_opacity_value">100</span>%</label>
+                                    <div class="form-text">Adjust the transparency of the QR codes.</div>
                                     <input type="range" class="form-range" id="qr_opacity" name="qr_opacity" min="0" max="100" value="100">
-                                    <small class="form-text text-muted">Adjust the transparency of the QR codes</small>
                                 </div>
                             </div>
                             <div class="col-md-6">
                                 <div class="mb-3">
                                     <label for="bg_opacity" class="form-label">Background Opacity: <span id="bg_opacity_value">71</span>%</label>
+                                    <div class="form-text">Adjust the transparency of the background image.</div>
                                     <input type="range" class="form-range" id="bg_opacity" name="bg_opacity" min="0" max="100" value="71">
-                                    <small class="form-text text-muted">Adjust the transparency of the background image</small>
                                 </div>
                             </div>
                         </div>
                         
-                        <div class="mb-3">
+                        <!-- <div class="mb-3">
                             <label for="qr_shade" class="form-label">QR Color Shade: <span id="qr_shade_value">1</span></label>
+                            <div class="form-text">Adjust how light or dark the QR code color is.</div>
                             <input type="range" class="form-range" id="qr_shade" name="qr_shade" min="0" max="2" step="0.01" value="1">
-                            <small class="form-text text-muted">Adjust how light or dark the QR code color is</small>
                         </div>
                         
                         <div class="mb-3">
                             <label for="qr_saturation" class="form-label">QR Color Saturation: <span id="qr_saturation_value">1</span></label>
+                            <div class="form-text">Adjust how vivid or muted the QR code color is (0 = grayscale, 1 = normal, 2 = extra vivid).</div>
                             <input type="range" class="form-range" id="qr_saturation" name="qr_saturation" min="0" max="2" step="0.01" value="1">
-                            <small class="form-text text-muted">Adjust how vivid or muted the QR code color is (0 = grayscale, 1 = normal, 2 = extra vivid)</small>
-                        </div>
-                        
-                        <div class="mb-3 form-check">
-                            <input type="checkbox" class="form-check-input" id="square_tiles" name="square_tiles">
-                            <label class="form-check-label" for="square_tiles">Force Square Tiles</label>
-                        </div>
+                        </div> -->
                         
                         <div class="form-group d-flex gap-2">
                             <button type="button" class="btn btn-secondary" id="preview-button">
