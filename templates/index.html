@@ -98,8 +98,8 @@
                         
                         <div class="mb-3">
                             <label for="tile_gap" class="form-label">Tile Gap (inches)</label>
-                            <div class="form-text">Enter the gap between QR code tiles in inches.</div>
-                            <input type="number" class="form-control" id="tile_gap" name="tile_gap" value="0" min="0" step="0.01">
+                            <input type="number" class="form-control" id="tile_gap" name="tile_gap" value="0" min="0" step="0.001">
+                            <div class="form-text">Visible gap between QR code tiles</div>
                         </div>
                         
                         <div class="row">
@@ -154,6 +154,17 @@
             <div class="card h-100">
                 <div class="card-body">
                     <h3 class="card-title">Preview</h3>
+                    
+                    <!-- Image Dimensions Display -->
+                    <div id="image-dimensions" class="mb-3" style="display: none;">
+                        <div class="alert alert-info">
+                            <strong>Image Dimensions:</strong> 
+                            <span id="image-width">0</span> × <span id="image-height">0</span> inches
+                            <br>
+                            <small class="text-muted">Based on your current settings</small>
+                        </div>
+                    </div>
+                    
                     <div id="preview-container" class="text-center">
                         <p class="text-muted" id="preview-placeholder">Click "Generate Preview" to see a preview</p>
                         <div id="preview-loading" class="d-none">
@@ -292,6 +303,49 @@ document.addEventListener('DOMContentLoaded', function() {
                 pixelInput.value = pixelValue;
             }
         });
+        
+        // Update image dimensions display
+        updateImageDimensions();
+    }
+    
+    function updateImageDimensions() {
+        const numCols = parseInt(document.getElementById('num_cols')?.value) || 20;
+        const numRows = parseInt(document.getElementById('num_rows')?.value) || 20;
+        const dpi = parseInt(dpiInput.value) || 300;
+        
+        // Get tile size in inches
+        const tileSizeIn = parseFloat(document.getElementById('tile_size')?.value) || 0;
+        
+        // Get margins in inches
+        const marginIn = parseFloat(document.getElementById('margin')?.value) || 0;
+        const outsideMarginIn = parseFloat(document.getElementById('outside_margin')?.value) || 0;
+        
+        // Calculate dimensions in inches
+        let width, height;
+        if (tileSizeIn > 0) {
+            // Fixed tile size
+            width = (numCols * tileSizeIn) + (2 * marginIn) + (2 * outsideMarginIn);
+            height = (numRows * tileSizeIn) + (2 * marginIn) + (2 * outsideMarginIn);
+        } else {
+            // Dynamic tile size (would need image dimensions)
+            width = 0;
+            height = 0;
+        }
+        
+        // Update display
+        const dimensionsDiv = document.getElementById('image-dimensions');
+        const widthSpan = document.getElementById('image-width');
+        const heightSpan = document.getElementById('image-height');
+        
+        if (dimensionsDiv && widthSpan && heightSpan) {
+            if (width > 0 && height > 0) {
+                widthSpan.textContent = width.toFixed(2);
+                heightSpan.textContent = height.toFixed(2);
+                dimensionsDiv.style.display = 'block';
+            } else {
+                dimensionsDiv.style.display = 'none';
+            }
+        }
     }
     
     if (dpiInput) {  // Only add event listener if dpiInput exists
@@ -304,6 +358,18 @@ document.addEventListener('DOMContentLoaded', function() {
             input.addEventListener('input', updatePixelValues);
         }
     });
+    
+    // Add event listeners for dimension-affecting inputs
+    const dimensionInputs = ['num_cols', 'num_rows', 'tile_size', 'margin', 'outside_margin'];
+    dimensionInputs.forEach(inputId => {
+        const input = document.getElementById(inputId);
+        if (input) {
+            input.addEventListener('input', updateImageDimensions);
+        }
+    });
+    
+    // Initial dimension calculation
+    updateImageDimensions();
     
     function updateMemoryInfo(memoryData) {
         if (!memoryInfo) return;
