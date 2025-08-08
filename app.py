@@ -1,5 +1,5 @@
 import os
-from flask import Flask, render_template, request, send_file, jsonify, session, redirect, url_for
+from flask import Flask, render_template, request, send_file, jsonify, session
 from werkzeug.utils import secure_filename
 from PIL import Image, ImageFilter, ImageDraw
 import pandas as pd
@@ -23,7 +23,6 @@ from qrcode.image.styles.moduledrawers import (
     GappedSquareModuleDrawer,
 )
 import numpy as np
-from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
 
 app = Flask(__name__)
 app.config['UPLOAD_FOLDER'] = os.getenv('UPLOAD_FOLDER', 'static/uploads')
@@ -34,27 +33,6 @@ app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=1)  # Session expires
 
 # Ensure upload folder exists
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
-
-# Initialize Flask-Login
-login_manager = LoginManager()
-login_manager.init_app(app)
-login_manager.login_view = 'login'
-
-# In-memory user store
-users = {
-    'chris': {'password': 'Nala2438!'},
-    'joe': {'password': 'WelcomeJoe2025!'}
-}
-
-class User(UserMixin):
-    def __init__(self, username):
-        self.id = username
-
-@login_manager.user_loader
-def load_user(user_id):
-    if user_id in users:
-        return User(user_id)
-    return None
 
 def cleanup_upload_folder():
     """Clean up files older than 24 hours from the upload folder"""
@@ -180,8 +158,8 @@ def get_qr_style(style_name):
     }
     return styles.get(style_name, SquareModuleDrawer())  # Default to SquareModuleDrawer if style not found
 
-def generate_qr_mosaic(image_path, excel_path, num_cols, num_rows, tile_size, 
-                      margin=0, qr_opacity=100, width_inches=0, height_inches=0, dpi=300, bg_opacity=100, preview=False, download_type='jpg', tile_gap=0, qr_shade=1.2, qr_saturation=1.0, outside_margin_px=0):
+def generate_qr_mosaic(image_path, excel_path, num_cols, num_rows, square_tiles, tile_size, 
+                      margin=0, qr_opacity=100, width_inches=0, height_inches=0, dpi=300, bg_opacity=100, preview=False, download_type='jpg', tile_gap=0, qr_shade=1.2, qr_saturation=1.0):
     # Load Excel data
     df = pd.read_excel(excel_path)
     
@@ -235,6 +213,11 @@ def generate_qr_mosaic(image_path, excel_path, num_cols, num_rows, tile_size,
     if tile_size:
         # Use the tile size provided by the user
         tile_size = tile_size
+    elif square_tiles:
+        # Force square tiles using the smaller computed dimension
+        computed_tile_width = base_width // num_cols
+        computed_tile_height = base_height // num_rows
+        tile_size = min(computed_tile_width, computed_tile_height)
     else:
         # Default to computed (non-square) sizes if nothing is specified.
         tile_size = None
@@ -243,6 +226,8 @@ def generate_qr_mosaic(image_path, excel_path, num_cols, num_rows, tile_size,
         # Enforce that all tiles are square and set mosaic dimensions accordingly.
         mosaic_width = num_cols * tile_size
         mosaic_height = num_rows * tile_size
+
+        # Resize the base image to exactly match the mosaic dimensions.
         base_image = base_image.resize((mosaic_width, mosaic_height), resample=Image.LANCZOS)
     else:
         # If no tile_size is specified, fall back to computed dimensions.
@@ -296,15 +281,11 @@ def generate_qr_mosaic(image_path, excel_path, num_cols, num_rows, tile_size,
             region_for_color = pixelated_for_color.crop((tile_x, tile_y, tile_x + current_tile_width, tile_y + current_tile_height))
             avg_color = region_for_color.resize((1, 1), resample=Image.LANCZOS).getpixel((0, 0))
 
-            # Use the average color for the QR code, white for the background (for QR code generation)
-            avg_color = tuple(int(x) for x in avg_color[:3])  # Ensure tuple of ints
-            qr_color_tuple = adjust_saturation(adjust_color_lighter(avg_color, 1), 1)
-            qr_color = '#%02x%02x%02x' % qr_color_tuple
-            bg_color = '#ffffff'  # White background for QR code generation
-            print(f"QR color: {qr_color}, BG color: {bg_color}")
+            # Use the average color for the QR code, transparent for the background
+            qr_color = adjust_saturation(adjust_color_lighter(avg_color, 1), 1)
+            bg_color = (255, 255, 255, 0)  # Fully transparent
 
-            # Remove qr_corner_style: always use SquareModuleDrawer
-            module_drawer = SquareModuleDrawer()
+            # Generate QR code with the selected colors
             qr = qrcode.QRCode(
                 version=1,
                 error_correction=qrcode.constants.ERROR_CORRECT_L,
@@ -313,28 +294,19 @@ def generate_qr_mosaic(image_path, excel_path, num_cols, num_rows, tile_size,
             )
             qr.add_data(url)
             qr.make(fit=True)
-            # Generate QR code as black on white
-            qr_img = qr.make_image(
-                image_factory=StyledPilImage,
-                module_drawer=module_drawer,
-                fill_color="#000000",
-                back_color="#ffffff"
-            ).convert('RGBA')
-
-            # Convert all black pixels to the desired color
-            arr = np.array(qr_img)
-            black_mask = (arr[..., 0:3] == [0, 0, 0]).all(axis=-1)
-            arr[..., :3][black_mask] = qr_color_tuple  # Use the sampled color
-            # Set all nearly white pixels to fully transparent
-            threshold = 180
-            near_white_mask = (arr[..., 0:3] > threshold).all(axis=-1)
-            arr[..., 3][near_white_mask] = 0
-            qr_img = Image.fromarray(arr, 'RGBA')
+            qr_img = qr.make_image(fill_color=qr_color, back_color=bg_color).convert('RGBA')
 
             # Resize QR code to fit within the tile with the gap
             qr_size = min(current_tile_width, current_tile_height) - (2 * gap)
             qr_size = max(qr_size, 1)
-            qr_img = qr_img.resize((qr_size, qr_size), resample=Image.NEAREST)
+            qr_img = qr_img.resize((qr_size, qr_size), resample=Image.LANCZOS)
+
+            # Set all nearly white pixels (e.g., RGB > 240) to fully transparent to remove any faint white border/quiet zone around the QR code.
+            arr = np.array(qr_img)
+            threshold = 240
+            near_white_mask = (arr[..., 0:3] > threshold).all(axis=-1)
+            arr[..., 3][near_white_mask] = 0
+            qr_img = Image.fromarray(arr, 'RGBA')
 
             # Calculate position to center the QR code in the tile (respecting gap)
             paste_x = margin + (col * current_tile_width) + gap + (current_tile_width - 2 * gap - qr_size) // 2
@@ -342,14 +314,6 @@ def generate_qr_mosaic(image_path, excel_path, num_cols, num_rows, tile_size,
 
             # Paste the QR code onto the mosaic
             mosaic.paste(qr_img, (paste_x, paste_y), qr_img)
-
-    # After generating the mosaic, add outside margin if needed
-    if outside_margin_px > 0:
-        new_width = mosaic.width + 2 * outside_margin_px
-        new_height = mosaic.height + 2 * outside_margin_px
-        mosaic_with_margin = Image.new("RGBA", (new_width, new_height), (255, 255, 255, 255))
-        mosaic_with_margin.paste(mosaic, (outside_margin_px, outside_margin_px), mosaic)
-        mosaic = mosaic_with_margin
 
     # Save the final image
     if download_type == 'png':
@@ -374,35 +338,10 @@ def generate_qr_mosaic(image_path, excel_path, num_cols, num_rows, tile_size,
             pass
     else:
         result_path = os.path.join(app.config['UPLOAD_FOLDER'], 'result.jpg')
-        if mosaic.mode == 'RGBA':
-            # Add a white background below the RGBA image
-            background = Image.new('RGB', mosaic.size, (255, 255, 255))
-            background.paste(mosaic, mask=mosaic.split()[3])  # Use alpha channel as mask
-            mosaic = background
         mosaic.save(result_path, 'JPEG', quality=95, dpi=(dpi, dpi))
     return result_path
 
-@app.route('/login', methods=['GET', 'POST'])
-def login():
-    if request.method == 'POST':
-        username = request.form['username']
-        password = request.form['password']
-        if username in users and users[username]['password'] == password:
-            user = User(username)
-            login_user(user)
-            return redirect(url_for('index'))
-        else:
-            return render_template('login.html', error='Invalid credentials')
-    return render_template('login.html')
-
-@app.route('/logout')
-@login_required
-def logout():
-    logout_user()
-    return redirect(url_for('login'))
-
 @app.route('/', methods=['GET', 'POST'])
-@login_required
 def index():
     if request.method == 'POST':
         # Add detailed debug prints
@@ -446,13 +385,11 @@ def index():
             # Get form parameters
             num_cols = int(request.form.get('num_cols', 20))
             num_rows = int(request.form.get('num_rows', 20))
-            # Get size parameters
-            dpi = request.form.get('dpi', '300')
-            dpi = int(dpi) if dpi.isdigit() else 300
-            # Get tile_size parameter (convert inches to pixels using DPI)
-            tile_size_in = request.form.get('tile_size')
-            tile_size = float(tile_size_in) * dpi if tile_size_in and tile_size_in.replace('.', '').isdigit() else None
+            square_tiles = 'square_tiles' in request.form
+            tile_size = request.form.get('tile_size_pixels')
+            tile_size = float(tile_size) if tile_size and tile_size.replace('.', '').isdigit() else None
             
+            # Get pixel values instead of direct inputs
             margin = request.form.get('margin_pixels')
             margin = float(margin) if margin and margin.replace('.', '').isdigit() else 0
             
@@ -472,6 +409,10 @@ def index():
             height_inches = request.form.get('height_inches', '0')
             height_inches = float(height_inches) if height_inches else 0
             
+            dpi = request.form.get('dpi', '300')
+            dpi = int(dpi) if dpi.isdigit() else 300
+            dpi = max(72, min(1200, dpi))  # Clamp between 72 and 1200
+            
             download_type = request.form.get('download_type', 'jpg')
             
             # Get tile_gap parameter
@@ -484,11 +425,6 @@ def index():
             # Get qr_saturation parameter
             qr_saturation = float(request.form.get('qr_saturation', '1.0'))
             
-            # Get outside_margin parameter (inches to pixels)
-            outside_margin_in = request.form.get('outside_margin', '0')
-            outside_margin = float(outside_margin_in) if outside_margin_in else 0
-            outside_margin_px = int(outside_margin * dpi)
-            
             print("Generating mosaic with parameters:")
             print(f"num_cols: {num_cols}, num_rows: {num_rows}")
             print(f"tile_size: {tile_size}, margin: {margin}, qr_opacity: {qr_opacity}")
@@ -499,6 +435,7 @@ def index():
                 excel_path,
                 num_cols,
                 num_rows,
+                square_tiles,
                 tile_size,
                 margin,
                 qr_opacity,
@@ -509,8 +446,7 @@ def index():
                 download_type='png',  # Always generate PNG for storage
                 tile_gap=tile_gap,
                 qr_shade=qr_shade,
-                qr_saturation=qr_saturation,
-                outside_margin_px=outside_margin_px
+                qr_saturation=qr_saturation
             )
             
             # Store the result path in session
@@ -530,7 +466,6 @@ def index():
     return render_template('index.html')
 
 @app.route('/preview', methods=['POST'])
-@login_required
 def preview():
     try:
         if 'image' not in request.files or 'excel' not in request.files:
@@ -563,12 +498,9 @@ def preview():
             # Get form parameters
             num_cols = int(request.form.get('num_cols', 20))
             num_rows = int(request.form.get('num_rows', 20))
-            # Get size parameters
-            dpi = request.form.get('dpi', '300')
-            dpi = int(dpi) if dpi.isdigit() else 300
-            # Get tile_size parameter (convert inches to pixels using DPI)
-            tile_size_in = request.form.get('tile_size')
-            tile_size = float(tile_size_in) * dpi if tile_size_in and tile_size_in.replace('.', '').isdigit() else None
+            square_tiles = 'square_tiles' in request.form
+            tile_size = request.form.get('tile_size_pixels')
+            tile_size = float(tile_size) if tile_size and tile_size.replace('.', '').isdigit() else None
             
             margin = request.form.get('margin_pixels')
             margin = float(margin) if margin and margin.replace('.', '').isdigit() else 0
@@ -587,7 +519,12 @@ def preview():
             height_inches = request.form.get('height_inches', '0')
             height_inches = float(height_inches) if height_inches else 0
             
-            download_type = request.form.get('download_type', 'jpg')
+            dpi = request.form.get('dpi', '300')
+            dpi = int(dpi) if dpi.isdigit() else 300
+            dpi = max(72, min(1200, dpi))
+            
+            # For preview, always use PNG format
+            download_type = 'png'
             
             # Get tile_gap parameter
             tile_gap = request.form.get('tile_gap', '0')
@@ -598,11 +535,6 @@ def preview():
             
             # Get qr_saturation parameter
             qr_saturation = float(request.form.get('qr_saturation', '1.0'))
-            
-            # Get outside_margin parameter (inches to pixels)
-            outside_margin_in = request.form.get('outside_margin', '0')
-            outside_margin = float(outside_margin_in) if outside_margin_in else 0
-            outside_margin_px = int(outside_margin * dpi)
             
             print("Generating preview with parameters:")
             print(f"num_cols: {num_cols}, num_rows: {num_rows}")
@@ -617,6 +549,7 @@ def preview():
                 excel_path,
                 num_cols,
                 num_rows,
+                square_tiles,
                 tile_size,
                 margin,
                 qr_opacity,
@@ -628,8 +561,7 @@ def preview():
                 download_type=download_type,
                 tile_gap=tile_gap,
                 qr_shade=qr_shade,
-                qr_saturation=qr_saturation,
-                outside_margin_px=outside_margin_px
+                qr_saturation=qr_saturation
             )
             
             # For preview, always return a PNG base64 image
@@ -651,7 +583,6 @@ def preview():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/download', methods=['POST'])
-@login_required
 def download():
     result_path = session.get('result_path')
     download_type = request.form.get('download_type', 'jpg')
