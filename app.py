@@ -185,6 +185,20 @@ def generate_qr_mosaic(image_path, excel_path, num_cols, num_rows, tile_size,
     # Load Excel data
     df = pd.read_excel(excel_path)
     
+    # Use the first column for URLs (regardless of header name)
+    if len(df.columns) == 0:
+        raise ValueError("Excel file appears to be empty")
+    
+    # Get the first column (index 0) for URLs
+    url_column = df.iloc[:, 0]
+    
+    # Remove rows with empty or NaN URL values
+    df = df.dropna(subset=[df.columns[0]])
+    df = df[df.iloc[:, 0].astype(str).str.strip() != '']
+    
+    if len(df) == 0:
+        raise ValueError("No valid URLs found in the Excel file. Please ensure the first column contains valid URLs.")
+    
     # Convert decimal values to integers for pixel calculations
     margin = int(margin)
     if tile_size is not None:
@@ -287,7 +301,13 @@ def generate_qr_mosaic(image_path, excel_path, num_cols, num_rows, tile_size,
                 current_tile_height = computed_tile_height
 
             # Get the URL for this tile; repeat the list if needed.
-            url = df.iloc[link_index % len(df)]["URL"]
+            url = df.iloc[link_index % len(df), 0]  # Get from first column
+            # Ensure URL is a string and not empty
+            url = str(url).strip()
+            if not url:
+                # Skip this tile if URL is empty
+                link_index += 1
+                continue
             link_index += 1
 
             tile_x = col * current_tile_width

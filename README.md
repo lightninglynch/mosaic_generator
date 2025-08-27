@@ -53,7 +53,7 @@ python app.py
 
 3. Upload your files:
    - An image file (JPG, PNG)
-   - An Excel file containing a "URL" column with the links you want to encode
+   - An Excel file with URLs in the first column (no header required)
 
 4. Configure the mosaic settings:
    - Number of columns and rows
@@ -70,11 +70,10 @@ python app.py
 
 ## Excel File Format
 
-Your Excel file should contain a column named "URL" with the links you want to encode in the QR codes. The application will use these URLs in sequence to create the mosaic.
+Your Excel file should contain URLs in the first column. The application will use these URLs in sequence to create the mosaic. No header is required.
 
 Example Excel format:
 ```
-URL
 https://example.com/1
 https://example.com/2
 https://example.com/3
