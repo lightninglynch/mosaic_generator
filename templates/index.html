@@ -78,7 +78,7 @@
                             <div class="col-md-4">
                                 <div class="mb-3">
                                     <label for="dpi" class="form-label">DPI (dots per inch)</label>
-                                    <div class="form-text">Enter the DPI for the printed output.</div>
+                                    <div class="form-text">Enter the DPI for the printed output. Higher DPI = larger file size. 150 DPI is often sufficient for most uses.</div>
                                     <input type="number" class="form-control" id="dpi" name="dpi" value="300" min="72" max="1200">
                                 </div>
                             </div>
@@ -92,8 +92,8 @@
                         
                         <div class="mb-3">
                             <label for="tile_size" class="form-label">Tile Size (inches)</label>
-                            <div class="form-text">Enter the size of each QR code tile in inches.</div>
-                            <input type="number" class="form-control" id="tile_size" name="tile_size" value="1" min="0.1" step="0.1">
+                            <div class="form-text">Enter the size of each QR code tile in inches. With 50×50 tiles at 300 DPI, a 0.9" tile size creates a ~13,650×13,650 pixel image.</div>
+                            <input type="number" class="form-control" id="tile_size" name="tile_size" value="0.9" min="0.1" step="0.01">
                         </div>
                         
                         <div class="mb-3">
@@ -177,9 +177,11 @@
                         <div id="memory-info" class="mt-3" style="display: none;">
                             <div class="alert" id="memory-alert">
                                 <strong>Memory Usage:</strong> <span id="current-memory">0</span>MB / <span id="max-memory">1500</span>MB
+                                <br>
+                                <strong>Image Size:</strong> <span id="total-pixels">0</span> pixels
                                 <div id="memory-warning" class="alert alert-warning mt-2 mb-0" style="display: none;">
                                     <i class="bi bi-exclamation-triangle"></i> 
-                                    <span id="memory-warning-text">Warning: Image memory usage exceeds available memory. Please reduce DPI or physical dimensions.</span>
+                                    <span id="memory-warning-text">Warning: Image size exceeds limits. Please reduce DPI or physical dimensions.</span>
                                     <div class="mt-2">
                                         <small>Recommended adjustments:</small>
                                         <ul class="mb-0">
@@ -375,12 +377,27 @@ document.addEventListener('DOMContentLoaded', function() {
         if (!memoryInfo) return;
         currentMemory.textContent = memoryData.estimated_memory_mb.toFixed(2);
         maxMemory.textContent = memoryData.max_memory_mb;
+        
+        // Update pixel count
+        const totalPixelsElement = document.getElementById('total-pixels');
+        if (totalPixelsElement && memoryData.total_pixels) {
+            totalPixelsElement.textContent = memoryData.total_pixels.toLocaleString();
+        }
+        
         memoryInfo.style.display = 'block';
         
         if (memoryData.exceeds_limit) {
             memoryAlert.classList.remove('alert-info');
             memoryAlert.classList.add('alert-danger');
             memoryWarning.style.display = 'block';
+            
+            // Update warning text based on the type of limit exceeded
+            const warningText = document.getElementById('memory-warning-text');
+            if (memoryData.pil_limit_exceeded) {
+                warningText.textContent = `Warning: Image size (${memoryData.total_pixels.toLocaleString()} pixels) exceeds PIL's limit (${memoryData.pil_limit.toLocaleString()} pixels). Please reduce DPI or physical dimensions.`;
+            } else {
+                warningText.textContent = `Warning: Image memory usage (${memoryData.estimated_memory_mb.toFixed(2)}MB) exceeds available memory (${memoryData.max_memory_mb}MB). Please reduce DPI or physical dimensions.`;
+            }
             
             // Calculate recommended adjustments
             const currentDpi = parseInt(document.getElementById('dpi').value);

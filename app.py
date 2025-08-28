@@ -25,6 +25,11 @@ from qrcode.image.styles.moduledrawers import (
 import numpy as np
 from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
 
+# Increase PIL's maximum image size limit to prevent decompression bomb errors
+# This allows for larger mosaics to be generated
+# Set to 1 billion pixels (about 31,600 x 31,600 pixels)
+Image.MAX_IMAGE_PIXELS = 1000000000
+
 app = Flask(__name__)
 app.config['UPLOAD_FOLDER'] = os.getenv('UPLOAD_FOLDER', 'static/uploads')
 app.config['MAX_CONTENT_LENGTH'] = int(os.getenv('MAX_CONTENT_LENGTH', 16 * 1024 * 1024))
@@ -138,10 +143,21 @@ def validate_memory_requirements(width_inches, height_inches, dpi, margin=0, max
     estimated_memory = estimate_final_image_memory(width_inches, height_inches, dpi, margin)
     max_memory_bytes = max_memory_mb * 1024 * 1024
     
+    # Calculate total pixels
+    width_pixels = int(width_inches * dpi) + (margin * 2)
+    height_pixels = int(height_inches * dpi) + (margin * 2)
+    total_pixels = width_pixels * height_pixels
+    
+    # Check against PIL's limit
+    pil_limit_exceeded = total_pixels > Image.MAX_IMAGE_PIXELS if Image.MAX_IMAGE_PIXELS else False
+    
     return {
-        'can_process': estimated_memory <= max_memory_bytes,
+        'can_process': estimated_memory <= max_memory_bytes and not pil_limit_exceeded,
         'estimated_memory_mb': estimated_memory / (1024 * 1024),
-        'max_memory_mb': max_memory_mb
+        'max_memory_mb': max_memory_mb,
+        'total_pixels': total_pixels,
+        'pil_limit_exceeded': pil_limit_exceeded,
+        'pil_limit': Image.MAX_IMAGE_PIXELS
     }
 
 def get_luminance(color):
@@ -210,10 +226,16 @@ def generate_qr_mosaic(image_path, excel_path, num_cols, num_rows, tile_size,
     if not preview:
         memory_validation = validate_memory_requirements(width_inches, height_inches, dpi, margin)
         if not memory_validation['can_process']:
-            raise ValueError(
-                f"Image size ({memory_validation['estimated_memory_mb']:.2f}MB) exceeds available memory "
-                f"({memory_validation['max_memory_mb']}MB). Please reduce DPI or physical dimensions."
-            )
+            if memory_validation['pil_limit_exceeded']:
+                raise ValueError(
+                    f"Image size ({memory_validation['total_pixels']:,} pixels) exceeds PIL's limit "
+                    f"({memory_validation['pil_limit']:,} pixels). Please reduce DPI or physical dimensions."
+                )
+            else:
+                raise ValueError(
+                    f"Image size ({memory_validation['estimated_memory_mb']:.2f}MB) exceeds available memory "
+                    f"({memory_validation['max_memory_mb']}MB). Please reduce DPI or physical dimensions."
+                )
     
     # Load the base image
     base_image = Image.open(image_path)
