@@ -161,8 +161,62 @@ def validate_memory_requirements(width_inches, height_inches, dpi, margin=0, max
     }
 
 def get_luminance(color):
-    r, g, b = color
+    r, g, b = color[:3]
     return 0.2126 * r + 0.7152 * g + 0.0722 * b
+
+def get_contrast_ratio(color1, color2):
+    """Calculate the contrast ratio between two colors (WCAG formula)"""
+    def relative_luminance(color):
+        r, g, b = [c / 255.0 for c in color[:3]]
+        r = r / 12.92 if r <= 0.03928 else ((r + 0.055) / 1.055) ** 2.4
+        g = g / 12.92 if g <= 0.03928 else ((g + 0.055) / 1.055) ** 2.4
+        b = b / 12.92 if b <= 0.03928 else ((b + 0.055) / 1.055) ** 2.4
+        return 0.2126 * r + 0.7152 * g + 0.0722 * b
+    
+    l1 = relative_luminance(color1)
+    l2 = relative_luminance(color2)
+    lighter = max(l1, l2)
+    darker = min(l1, l2)
+    return (lighter + 0.05) / (darker + 0.05)
+
+def adjust_color_for_contrast(qr_color, bg_color, min_contrast_ratio=2.5):
+    """
+    Adjust the QR code color to ensure sufficient contrast against the background.
+    If the contrast is too low, darken or lighten the QR code color as needed.
+    """
+    current_contrast = get_contrast_ratio(qr_color, bg_color)
+    
+    if current_contrast >= min_contrast_ratio:
+        return qr_color
+    
+    r, g, b = qr_color[:3]
+    h, l, s = rgb_to_hls(r / 255.0, g / 255.0, b / 255.0)
+    
+    bg_luminance = get_luminance(bg_color)
+    
+    # Track the best color found during adjustment
+    best_color = qr_color
+    
+    if bg_luminance > 128:
+        # Background is light, darken the QR code
+        for _ in range(50):
+            l = max(0, l - 0.05)
+            new_r, new_g, new_b = hls_to_rgb(h, l, s)
+            best_color = (int(new_r * 255), int(new_g * 255), int(new_b * 255))
+            if get_contrast_ratio(best_color, bg_color) >= min_contrast_ratio:
+                return best_color
+        # Return the darkest version we computed
+        return best_color
+    else:
+        # Background is dark, lighten the QR code
+        for _ in range(50):
+            l = min(1, l + 0.05)
+            new_r, new_g, new_b = hls_to_rgb(h, l, s)
+            best_color = (int(new_r * 255), int(new_g * 255), int(new_b * 255))
+            if get_contrast_ratio(best_color, bg_color) >= min_contrast_ratio:
+                return best_color
+        # Return the lightest version we computed
+        return best_color
 
 def adjust_color_lighter(color, factor=1.2):
     # Get the luminance of the original color
@@ -341,9 +395,14 @@ def generate_qr_mosaic(image_path, excel_path, num_cols, num_rows, tile_size,
             # Use the average color for the QR code, white for the background (for QR code generation)
             avg_color = tuple(int(x) for x in avg_color[:3])  # Ensure tuple of ints
             qr_color_tuple = adjust_saturation(adjust_color_lighter(avg_color, 1), 1)
+            
+            # Adjust QR color for contrast if background is too similar
+            # The background here is the avg_color from the tile (not the QR generation background)
+            qr_color_tuple = adjust_color_for_contrast(qr_color_tuple, avg_color, min_contrast_ratio=2.5)
+            
             qr_color = '#%02x%02x%02x' % qr_color_tuple
             bg_color = '#ffffff'  # White background for QR code generation
-            print(f"QR color: {qr_color}, BG color: {bg_color}")
+            print(f"QR color: {qr_color}, BG color: {bg_color}, Tile avg color: {avg_color}")
 
             # Remove qr_corner_style: always use SquareModuleDrawer
             module_drawer = SquareModuleDrawer()
