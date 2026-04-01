@@ -161,8 +161,69 @@ def validate_memory_requirements(width_inches, height_inches, dpi, margin=0, max
     }
 
 def get_luminance(color):
-    r, g, b = color
+    r, g, b = color[:3]
     return 0.2126 * r + 0.7152 * g + 0.0722 * b
+
+def get_contrasting_qr_color(avg_color, lighter_color):
+    """
+    Ensures the QR code color has sufficient contrast with the background.
+    If the background is too light (high luminance), darken the QR code color.
+    If the background is too dark (low luminance), lighten the QR code color.
+    
+    Args:
+        avg_color: The average background color (r, g, b)
+        lighter_color: The initially computed lighter QR color (r, g, b)
+    
+    Returns:
+        A color tuple (r, g, b) with sufficient contrast
+    """
+    bg_luminance = get_luminance(avg_color)
+    qr_luminance = get_luminance(lighter_color)
+    
+    min_contrast_ratio = 0.3
+    luminance_diff = abs(bg_luminance - qr_luminance) / 255.0
+    
+    if luminance_diff >= min_contrast_ratio:
+        return lighter_color
+    
+    if bg_luminance > 180:
+        target_luminance = bg_luminance - (255 * min_contrast_ratio) - 20
+        target_luminance = max(0, target_luminance)
+        
+        current_lum = get_luminance(lighter_color)
+        if current_lum > 0:
+            factor = target_luminance / current_lum
+        else:
+            factor = 0.3
+        
+        factor = min(factor, 1.0)
+        factor = max(factor, 0.2)
+        
+        darkened = tuple(max(0, min(255, int(c * factor))) for c in lighter_color)
+        
+        final_diff = abs(get_luminance(darkened) - bg_luminance) / 255.0
+        if final_diff < min_contrast_ratio:
+            darkened = tuple(max(0, int(c * 0.4)) for c in avg_color)
+        
+        return darkened
+    
+    elif bg_luminance < 75:
+        target_luminance = bg_luminance + (255 * min_contrast_ratio) + 20
+        target_luminance = min(255, target_luminance)
+        
+        current_lum = get_luminance(lighter_color)
+        if current_lum > 0:
+            factor = target_luminance / current_lum
+        else:
+            factor = 2.0
+        
+        factor = max(factor, 1.5)
+        factor = min(factor, 3.0)
+        
+        lightened = tuple(max(0, min(255, int(c * factor))) for c in lighter_color)
+        return lightened
+    
+    return lighter_color
 
 def adjust_color_lighter(color, factor=1.2):
     # Get the luminance of the original color
@@ -340,10 +401,13 @@ def generate_qr_mosaic(image_path, excel_path, num_cols, num_rows, tile_size,
 
             # Use the average color for the QR code, white for the background (for QR code generation)
             avg_color = tuple(int(x) for x in avg_color[:3])  # Ensure tuple of ints
-            qr_color_tuple = adjust_saturation(adjust_color_lighter(avg_color, 1), 1)
+            initial_qr_color = adjust_saturation(adjust_color_lighter(avg_color, 1), 1)
+            # Apply contrast adjustment to ensure QR code is visible against the background
+            qr_color_tuple = get_contrasting_qr_color(avg_color, initial_qr_color)
             qr_color = '#%02x%02x%02x' % qr_color_tuple
             bg_color = '#ffffff'  # White background for QR code generation
-            print(f"QR color: {qr_color}, BG color: {bg_color}")
+            bg_lum = get_luminance(avg_color)
+            print(f"Tile ({row},{col}) - BG luminance: {bg_lum:.1f}, QR color: {qr_color}")
 
             # Remove qr_corner_style: always use SquareModuleDrawer
             module_drawer = SquareModuleDrawer()
