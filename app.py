@@ -185,7 +185,13 @@ def adjust_saturation(color, saturation=1.0):
     r, g, b = hls_to_rgb(h, l, s)
     return (int(r * 255), int(g * 255), int(b * 255))
 
-def ensure_light_tile_contrast(fg_color, bg_color, bright_bg_threshold=205, min_luminance_diff=45):
+def ensure_light_tile_contrast(
+    fg_color,
+    bg_color,
+    bright_bg_threshold=170,
+    min_luminance_diff=80,
+    max_fg_luminance_on_bright_bg=120
+):
     """
     Only enforce contrast when the tile background is very bright.
     This avoids changing the look of normal/darker tiles.
@@ -197,11 +203,11 @@ def ensure_light_tile_contrast(fg_color, bg_color, bright_bg_threshold=205, min_
     if bg_lum < bright_bg_threshold:
         return fg_color
 
-    if (bg_lum - fg_lum) >= min_luminance_diff:
+    if (bg_lum - fg_lum) >= min_luminance_diff and fg_lum <= max_fg_luminance_on_bright_bg:
         return fg_color
 
     # Bright tile: darken module color enough to separate from background.
-    target_lum = max(0, bg_lum - min_luminance_diff)
+    target_lum = min(max_fg_luminance_on_bright_bg, max(0, bg_lum - min_luminance_diff))
     if fg_lum <= 0:
         return (0, 0, 0)
     scale = target_lum / fg_lum
@@ -356,14 +362,18 @@ def generate_qr_mosaic(image_path, excel_path, num_cols, num_rows, tile_size,
 
             tile_x = col * current_tile_width
             tile_y = row * current_tile_height
-            # Always sample color from the original pixelated image (before opacity)
+            # Sample the source color for stylistic QR tint.
             region_for_color = pixelated_for_color.crop((tile_x, tile_y, tile_x + current_tile_width, tile_y + current_tile_height))
             avg_color = region_for_color.resize((1, 1), resample=Image.LANCZOS).getpixel((0, 0))
+            # Sample displayed background color for readability contrast checks.
+            region_for_bg = pixelated.crop((tile_x, tile_y, tile_x + current_tile_width, tile_y + current_tile_height))
+            avg_bg_color = region_for_bg.resize((1, 1), resample=Image.LANCZOS).getpixel((0, 0))
 
             # Use the average color for the QR code, white for the background (for QR code generation)
             avg_color = tuple(int(x) for x in avg_color[:3])  # Ensure tuple of ints
+            avg_bg_color = tuple(int(x) for x in avg_bg_color[:3])  # Ensure tuple of ints
             qr_color_tuple = adjust_saturation(adjust_color_lighter(avg_color, qr_shade), qr_saturation)
-            qr_color_tuple = ensure_light_tile_contrast(qr_color_tuple, avg_color)
+            qr_color_tuple = ensure_light_tile_contrast(qr_color_tuple, avg_bg_color)
             qr_color = '#%02x%02x%02x' % qr_color_tuple
             bg_color = '#ffffff'  # White background for QR code generation
 
