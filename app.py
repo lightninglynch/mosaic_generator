@@ -185,6 +185,62 @@ def adjust_saturation(color, saturation=1.0):
     r, g, b = hls_to_rgb(h, l, s)
     return (int(r * 255), int(g * 255), int(b * 255))
 
+def get_relative_luminance(color):
+    """Calculate WCAG relative luminance for an RGB color tuple."""
+    def linearize(channel):
+        channel = channel / 255.0
+        if channel <= 0.04045:
+            return channel / 12.92
+        return ((channel + 0.055) / 1.055) ** 2.4
+
+    r, g, b = color
+    r_lin, g_lin, b_lin = linearize(r), linearize(g), linearize(b)
+    return 0.2126 * r_lin + 0.7152 * g_lin + 0.0722 * b_lin
+
+def get_contrast_ratio(color_a, color_b):
+    """Calculate contrast ratio between two RGB colors."""
+    lum_a = get_relative_luminance(color_a)
+    lum_b = get_relative_luminance(color_b)
+    lighter = max(lum_a, lum_b)
+    darker = min(lum_a, lum_b)
+    return (lighter + 0.05) / (darker + 0.05)
+
+def blend_toward(color, target, amount):
+    """Blend an RGB color toward a target RGB color by amount [0, 1]."""
+    amount = max(0.0, min(1.0, amount))
+    return tuple(
+        int(round((1 - amount) * c + amount * t))
+        for c, t in zip(color, target)
+    )
+
+def ensure_tile_contrast(qr_color, tile_color, min_ratio=2.2, steps=12):
+    """
+    Ensure QR module color has enough contrast against this specific tile color.
+    Tries preserving original hue first, then pushes toward black/white as needed.
+    """
+    current_ratio = get_contrast_ratio(qr_color, tile_color)
+    if current_ratio >= min_ratio:
+        return qr_color
+
+    # If tile is bright, darken QR modules; if tile is dark, lighten modules.
+    tile_luminance = get_relative_luminance(tile_color)
+    target = (0, 0, 0) if tile_luminance >= 0.5 else (255, 255, 255)
+
+    best_color = qr_color
+    best_ratio = current_ratio
+
+    for step in range(1, steps + 1):
+        amount = step / steps
+        candidate = blend_toward(qr_color, target, amount)
+        ratio = get_contrast_ratio(candidate, tile_color)
+        if ratio > best_ratio:
+            best_ratio = ratio
+            best_color = candidate
+        if ratio >= min_ratio:
+            return candidate
+
+    return best_color
+
 def get_qr_style(style_name):
     """Get the QR code module drawer based on the selected style"""
     styles = {
@@ -340,7 +396,10 @@ def generate_qr_mosaic(image_path, excel_path, num_cols, num_rows, tile_size,
 
             # Use the average color for the QR code, white for the background (for QR code generation)
             avg_color = tuple(int(x) for x in avg_color[:3])  # Ensure tuple of ints
-            qr_color_tuple = adjust_saturation(adjust_color_lighter(avg_color, 1), 1)
+            # Start from sampled tile color, then enforce a minimum contrast so light tiles
+            # (e.g. white sky) do not produce unreadable near-white QR modules.
+            qr_color_tuple = adjust_saturation(adjust_color_lighter(avg_color, qr_shade), qr_saturation)
+            qr_color_tuple = ensure_tile_contrast(qr_color_tuple, avg_color)
             qr_color = '#%02x%02x%02x' % qr_color_tuple
             bg_color = '#ffffff'  # White background for QR code generation
             print(f"QR color: {qr_color}, BG color: {bg_color}")
