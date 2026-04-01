@@ -385,14 +385,13 @@ def generate_qr_mosaic(image_path, excel_path, num_cols, num_rows, tile_size,
                 back_color="#ffffff"
             ).convert('RGBA')
 
-            # Convert all black pixels to the desired color
+            # Convert all black QR module pixels to the desired color
             arr = np.array(qr_img)
             black_mask = (arr[..., 0:3] == [0, 0, 0]).all(axis=-1)
             arr[..., :3][black_mask] = qr_color_tuple  # Use the sampled color
-            # Set all nearly white pixels to fully transparent
-            threshold = 180
-            near_white_mask = (arr[..., 0:3] > threshold).all(axis=-1)
-            arr[..., 3][near_white_mask] = 0
+            # Make only the QR background transparent.
+            # Using a near-white threshold can accidentally hide light module colors.
+            arr[..., 3][~black_mask] = 0
             qr_img = Image.fromarray(arr, 'RGBA')
 
             # Resize QR code to fit within the tile with the gap
