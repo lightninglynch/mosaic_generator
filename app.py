@@ -387,7 +387,9 @@ def generate_qr_mosaic(image_path, excel_path, num_cols, num_rows, tile_size,
             # Use the average color for the QR code, white for the background (for QR code generation)
             avg_color = tuple(int(x) for x in avg_color[:3])  # Ensure tuple of ints
             avg_bg_color = to_display_rgb(avg_bg_color)
-            qr_color_tuple = adjust_saturation(adjust_color_lighter(avg_color, qr_shade), qr_saturation)
+            # Preserve the original baseline look for normal tiles.
+            # The white-tile contrast guard below is the only intentional override.
+            qr_color_tuple = adjust_saturation(adjust_color_lighter(avg_color, 1), 1)
             qr_color_tuple = ensure_light_tile_contrast(qr_color_tuple, avg_bg_color)
             qr_color = '#%02x%02x%02x' % qr_color_tuple
             bg_color = '#ffffff'  # White background for QR code generation
