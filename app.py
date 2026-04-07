@@ -185,6 +185,21 @@ def adjust_saturation(color, saturation=1.0):
     r, g, b = hls_to_rgb(h, l, s)
     return (int(r * 255), int(g * 255), int(b * 255))
 
+def to_display_rgb(color):
+    """
+    Convert sampled pixel color to the effective RGB shown on a white canvas.
+    Handles RGBA pixels from partially transparent backgrounds.
+    """
+    if len(color) >= 4:
+        r, g, b, a = [int(x) for x in color[:4]]
+        alpha = a / 255.0
+        return (
+            int(r * alpha + 255 * (1 - alpha)),
+            int(g * alpha + 255 * (1 - alpha)),
+            int(b * alpha + 255 * (1 - alpha))
+        )
+    return tuple(int(x) for x in color[:3])
+
 def ensure_light_tile_contrast(
     fg_color,
     bg_color,
@@ -202,6 +217,14 @@ def ensure_light_tile_contrast(
     # Keep original color unless tile is very bright.
     if bg_lum < bright_bg_threshold:
         return fg_color
+
+    # Very bright tiles need a harder cap so modules never wash out.
+    if bg_lum >= 230:
+        target_lum = min(85, max(0, bg_lum - min_luminance_diff))
+        if fg_lum <= 0:
+            return (0, 0, 0)
+        scale = target_lum / fg_lum
+        return tuple(max(0, min(255, int(c * scale))) for c in fg_color)
 
     if (bg_lum - fg_lum) >= min_luminance_diff and fg_lum <= max_fg_luminance_on_bright_bg:
         return fg_color
@@ -371,7 +394,7 @@ def generate_qr_mosaic(image_path, excel_path, num_cols, num_rows, tile_size,
 
             # Use the average color for the QR code, white for the background (for QR code generation)
             avg_color = tuple(int(x) for x in avg_color[:3])  # Ensure tuple of ints
-            avg_bg_color = tuple(int(x) for x in avg_bg_color[:3])  # Ensure tuple of ints
+            avg_bg_color = to_display_rgb(avg_bg_color)
             qr_color_tuple = adjust_saturation(adjust_color_lighter(avg_color, qr_shade), qr_saturation)
             qr_color_tuple = ensure_light_tile_contrast(qr_color_tuple, avg_bg_color)
             qr_color = '#%02x%02x%02x' % qr_color_tuple
