@@ -416,8 +416,9 @@ def generate_qr_mosaic(image_path, excel_path, num_cols, num_rows, tile_size,
             arr = np.array(qr_img)
             black_mask = (arr[..., 0:3] == [0, 0, 0]).all(axis=-1)
             arr[..., :3][black_mask] = qr_color_tuple  # Use the sampled color
-            # Make only the QR background transparent.
-            # Using a near-white threshold can accidentally hide light module colors.
+            # Apply user QR opacity to module pixels and keep only modules visible.
+            module_alpha = max(0, min(255, int(qr_opacity * 2.55)))
+            arr[..., 3][black_mask] = module_alpha
             arr[..., 3][~black_mask] = 0
             qr_img = Image.fromarray(arr, 'RGBA')
 
