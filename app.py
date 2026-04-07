@@ -203,34 +203,26 @@ def to_display_rgb(color):
 def ensure_light_tile_contrast(
     fg_color,
     bg_color,
-    bright_bg_threshold=170,
-    min_luminance_diff=80,
-    max_fg_luminance_on_bright_bg=120
+    bright_bg_threshold=235,
+    min_luminance_diff=28
 ):
     """
-    Only enforce contrast when the tile background is very bright.
-    This avoids changing the look of normal/darker tiles.
+    Apply only a subtle correction on near-white tiles.
+    Non-white tiles keep their original sampled QR tint.
     """
     fg_lum = get_luminance(fg_color)
     bg_lum = get_luminance(bg_color)
 
-    # Keep original color unless tile is very bright.
+    # Keep original color unless tile is near-white.
     if bg_lum < bright_bg_threshold:
         return fg_color
 
-    # Very bright tiles need a harder cap so modules never wash out.
-    if bg_lum >= 230:
-        target_lum = min(85, max(0, bg_lum - min_luminance_diff))
-        if fg_lum <= 0:
-            return (0, 0, 0)
-        scale = target_lum / fg_lum
-        return tuple(max(0, min(255, int(c * scale))) for c in fg_color)
-
-    if (bg_lum - fg_lum) >= min_luminance_diff and fg_lum <= max_fg_luminance_on_bright_bg:
+    # If contrast is already enough, don't change the tile.
+    if (bg_lum - fg_lum) >= min_luminance_diff:
         return fg_color
 
-    # Bright tile: darken module color enough to separate from background.
-    target_lum = min(max_fg_luminance_on_bright_bg, max(0, bg_lum - min_luminance_diff))
+    # Near-white tile: darken just enough to create a visible tint.
+    target_lum = max(0, bg_lum - min_luminance_diff)
     if fg_lum <= 0:
         return (0, 0, 0)
     scale = target_lum / fg_lum
