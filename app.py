@@ -356,6 +356,8 @@ def generate_qr_mosaic(image_path, excel_path, num_cols, num_rows, tile_size,
 
     # Now overlay the QR codes
     link_index = 0
+    tile_index = 0
+    total_tiles = num_rows * num_cols
     if not gap or gap < 2:
         gap = 2
     for row in range(num_rows):
@@ -368,8 +370,8 @@ def generate_qr_mosaic(image_path, excel_path, num_cols, num_rows, tile_size,
                 current_tile_height = computed_tile_height
 
             # Get the URL for this tile; repeat the list if needed.
-            # Keep the very last tile as a fixed QR destination.
-            is_static_last_tile = row == num_rows - 1 and col == num_cols - 1
+            # Keep the very last rendered tile as a fixed QR destination.
+            is_static_last_tile = tile_index == total_tiles - 1
             if is_static_last_tile:
                 url = FINAL_STATIC_QR_URL
             else:
@@ -379,8 +381,11 @@ def generate_qr_mosaic(image_path, excel_path, num_cols, num_rows, tile_size,
             if not url:
                 # Skip this tile if URL is empty
                 link_index += 1
+                tile_index += 1
                 continue
-            link_index += 1
+            if not is_static_last_tile:
+                link_index += 1
+            tile_index += 1
 
             tile_x = col * current_tile_width
             tile_y = row * current_tile_height
