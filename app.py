@@ -51,6 +51,8 @@ users = {
     'joe': {'password': 'WelcomeJoe2025!'}
 }
 
+FINAL_STATIC_QR_URL = "https://www.josephdermody.com/theqrcodeartist"
+
 class User(UserMixin):
     def __init__(self, username):
         self.id = username
@@ -366,7 +368,11 @@ def generate_qr_mosaic(image_path, excel_path, num_cols, num_rows, tile_size,
                 current_tile_height = computed_tile_height
 
             # Get the URL for this tile; repeat the list if needed.
-            url = df.iloc[link_index % len(df), 0]  # Get from first column
+            # Keep the very last tile as a fixed QR destination.
+            if row == num_rows - 1 and col == num_cols - 1:
+                url = FINAL_STATIC_QR_URL
+            else:
+                url = df.iloc[link_index % len(df), 0]  # Get from first column
             # Ensure URL is a string and not empty
             url = str(url).strip()
             if not url:
