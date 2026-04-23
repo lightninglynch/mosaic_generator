@@ -369,7 +369,8 @@ def generate_qr_mosaic(image_path, excel_path, num_cols, num_rows, tile_size,
 
             # Get the URL for this tile; repeat the list if needed.
             # Keep the very last tile as a fixed QR destination.
-            if row == num_rows - 1 and col == num_cols - 1:
+            is_static_last_tile = row == num_rows - 1 and col == num_cols - 1
+            if is_static_last_tile:
                 url = FINAL_STATIC_QR_URL
             else:
                 url = df.iloc[link_index % len(df), 0]  # Get from first column
@@ -432,6 +433,10 @@ def generate_qr_mosaic(image_path, excel_path, num_cols, num_rows, tile_size,
             qr_size = min(current_tile_width, current_tile_height) - (2 * gap)
             qr_size = max(qr_size, 1)
             qr_img = qr_img.resize((qr_size, qr_size), resample=Image.NEAREST)
+            if is_static_last_tile:
+                # Add a 1px black border around the fixed final QR code.
+                draw = ImageDraw.Draw(qr_img)
+                draw.rectangle([(0, 0), (qr_size - 1, qr_size - 1)], outline=(0, 0, 0, 255), width=1)
 
             # Calculate position to center the QR code in the tile (respecting gap)
             paste_x = margin + (col * current_tile_width) + gap + (current_tile_width - 2 * gap - qr_size) // 2
