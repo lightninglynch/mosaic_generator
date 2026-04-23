@@ -439,9 +439,9 @@ def generate_qr_mosaic(image_path, excel_path, num_cols, num_rows, tile_size,
             qr_size = max(qr_size, 1)
             qr_img = qr_img.resize((qr_size, qr_size), resample=Image.NEAREST)
             if is_static_last_tile:
-                # Add a 1px black border around the fixed final QR code.
+                # Add a 3px black border around the fixed final QR code.
                 draw = ImageDraw.Draw(qr_img)
-                draw.rectangle([(0, 0), (qr_size - 1, qr_size - 1)], outline=(0, 0, 0, 255), width=1)
+                draw.rectangle([(0, 0), (qr_size - 1, qr_size - 1)], outline=(0, 0, 0, 255), width=3)
 
             # Calculate position to center the QR code in the tile (respecting gap)
             paste_x = margin + (col * current_tile_width) + gap + (current_tile_width - 2 * gap - qr_size) // 2
