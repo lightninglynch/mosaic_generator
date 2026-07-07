@@ -333,26 +333,29 @@ def generate_qr_mosaic(image_path, excel_path, num_cols, num_rows, tile_size,
         computed_tile_width = base_width // num_cols
         computed_tile_height = base_height // num_rows
 
-    # Create mosaic with margin
+    # Create mosaic with margin. RGB instead of RGBA: 25% less memory per
+    # full-size buffer, and no flatten step is needed for JPEG/PDF output.
     final_width = mosaic_width + (2 * margin)
     final_height = mosaic_height + (2 * margin)
-    mosaic = Image.new("RGBA", (final_width, final_height), (255, 255, 255, 0))
+    mosaic = Image.new("RGB", (final_width, final_height), (255, 255, 255))
 
-    # Create a pixelated version of the base image for color sampling (before opacity)
-    pixelated_for_color = base_image.resize((num_cols, num_rows), resample=Image.NEAREST)
-    pixelated_for_color = pixelated_for_color.resize((mosaic_width, mosaic_height), resample=Image.NEAREST)
-    pixelated = pixelated_for_color.copy()
+    # One pixel per tile: serves as the per-tile color sample AND (upscaled)
+    # as the pixelated background, so no second full-size copy is needed.
+    color_grid = base_image.resize((num_cols, num_rows), resample=Image.NEAREST).convert("RGB")
+    base_image.close()
+
+    pixelated = color_grid.resize((mosaic_width, mosaic_height), resample=Image.NEAREST)
     pixelated = pixelated.filter(ImageFilter.GaussianBlur(radius=5))
 
-    # Apply background opacity if less than 100%
+    # Apply background opacity if less than 100% (fade toward white)
     if bg_opacity < 100:
-        pixelated = pixelated.convert("RGBA")
-        bg_image = Image.new("RGBA", pixelated.size, (255, 255, 255, 0))
-        mask = Image.new("L", pixelated.size, int(bg_opacity * 2.55))
-        pixelated = Image.composite(pixelated, bg_image, mask)
+        white = Image.new("RGB", pixelated.size, (255, 255, 255))
+        pixelated = Image.blend(white, pixelated, bg_opacity / 100.0)
+        del white
 
     # Paste the pixelated background onto the mosaic
     mosaic.paste(pixelated, (margin, margin))
+    del pixelated
 
     # Now overlay the QR codes
     link_index = 0
@@ -360,6 +363,10 @@ def generate_qr_mosaic(image_path, excel_path, num_cols, num_rows, tile_size,
     total_tiles = num_rows * num_cols
     if not gap or gap < 2:
         gap = 2
+    # Cache QR module matrices so each unique URL is only encoded once,
+    # no matter how many tiles it appears on
+    qr_module_cache = {}
+    module_alpha = max(0, min(255, int(qr_opacity * 2.55)))
     for row in range(num_rows):
         for col in range(num_cols):
             if tile_size is not None:
@@ -387,51 +394,38 @@ def generate_qr_mosaic(image_path, excel_path, num_cols, num_rows, tile_size,
                 link_index += 1
             tile_index += 1
 
-            tile_x = col * current_tile_width
-            tile_y = row * current_tile_height
-            # Sample the source color for stylistic QR tint.
-            region_for_color = pixelated_for_color.crop((tile_x, tile_y, tile_x + current_tile_width, tile_y + current_tile_height))
-            avg_color = region_for_color.resize((1, 1), resample=Image.LANCZOS).getpixel((0, 0))
-            # Sample displayed background color for readability contrast checks.
-            region_for_bg = pixelated.crop((tile_x, tile_y, tile_x + current_tile_width, tile_y + current_tile_height))
-            avg_bg_color = region_for_bg.resize((1, 1), resample=Image.LANCZOS).getpixel((0, 0))
-
-            # Use the average color for the QR code, white for the background (for QR code generation)
+            # The color grid has exactly one pixel per tile: sample the source
+            # color for the stylistic QR tint directly
+            avg_color = color_grid.getpixel((col, row))
             avg_color = tuple(int(x) for x in avg_color[:3])  # Ensure tuple of ints
-            avg_bg_color = to_display_rgb(avg_bg_color)
+            # Displayed background color for readability contrast checks:
+            # the tile color faded toward white by bg_opacity
+            avg_bg_color = tuple(
+                int(c * bg_opacity / 100 + 255 * (1 - bg_opacity / 100)) for c in avg_color
+            )
             # Preserve the original baseline look for normal tiles.
             # The white-tile contrast guard below is the only intentional override.
             qr_color_tuple = adjust_saturation(adjust_color_lighter(avg_color, 1), 1)
             qr_color_tuple = ensure_light_tile_contrast(qr_color_tuple, avg_bg_color)
-            qr_color = '#%02x%02x%02x' % qr_color_tuple
-            bg_color = '#ffffff'  # White background for QR code generation
 
-            # Remove qr_corner_style: always use SquareModuleDrawer
-            module_drawer = SquareModuleDrawer()
-            qr = qrcode.QRCode(
-                version=1,
-                error_correction=qrcode.constants.ERROR_CORRECT_L,
-                box_size=10,
-                border=0,
-            )
-            qr.add_data(url)
-            qr.make(fit=True)
-            # Generate QR code as black on white
-            qr_img = qr.make_image(
-                image_factory=StyledPilImage,
-                module_drawer=module_drawer,
-                fill_color="#000000",
-                back_color="#ffffff"
-            ).convert('RGBA')
+            modules = qr_module_cache.get(url)
+            if modules is None:
+                qr = qrcode.QRCode(
+                    version=1,
+                    error_correction=qrcode.constants.ERROR_CORRECT_L,
+                    box_size=1,
+                    border=0,
+                )
+                qr.add_data(url)
+                qr.make(fit=True)
+                modules = np.array(qr.get_matrix(), dtype=bool)
+                qr_module_cache[url] = modules
 
-            # Convert all black QR module pixels to the desired color
-            arr = np.array(qr_img)
-            black_mask = (arr[..., 0:3] == [0, 0, 0]).all(axis=-1)
-            arr[..., :3][black_mask] = qr_color_tuple  # Use the sampled color
-            # Apply user QR opacity to module pixels and keep only modules visible.
-            module_alpha = max(0, min(255, int(qr_opacity * 2.55)))
-            arr[..., 3][black_mask] = module_alpha
-            arr[..., 3][~black_mask] = 0
+            # Build the QR tile directly at module resolution (e.g. 21x21):
+            # colored modules (at qr_opacity) on a transparent background
+            n = modules.shape[0]
+            arr = np.zeros((n, n, 4), dtype=np.uint8)
+            arr[modules] = (*qr_color_tuple, module_alpha)
             qr_img = Image.fromarray(arr, 'RGBA')
 
             # Resize QR code to fit within the tile with the gap
@@ -454,38 +448,20 @@ def generate_qr_mosaic(image_path, excel_path, num_cols, num_rows, tile_size,
     if outside_margin_px > 0:
         new_width = mosaic.width + 2 * outside_margin_px
         new_height = mosaic.height + 2 * outside_margin_px
-        mosaic_with_margin = Image.new("RGBA", (new_width, new_height), (255, 255, 255, 255))
-        mosaic_with_margin.paste(mosaic, (outside_margin_px, outside_margin_px), mosaic)
+        mosaic_with_margin = Image.new("RGB", (new_width, new_height), (255, 255, 255))
+        mosaic_with_margin.paste(mosaic, (outside_margin_px, outside_margin_px))
         mosaic = mosaic_with_margin
 
-    # Save the final image
+    # Save the final image (canvas is already RGB, so no flattening needed)
     if download_type == 'png':
         result_path = os.path.join(app.config['UPLOAD_FOLDER'], 'result.png')
         mosaic.save(result_path, 'PNG', dpi=(dpi, dpi))
     elif download_type == 'pdf':
-        # For PDF, save as PNG first
-        temp_png = os.path.join(app.config['UPLOAD_FOLDER'], 'temp_result.png')
-        mosaic.save(temp_png, 'PNG', dpi=(dpi, dpi))
-        
-        # Convert PNG to PDF
+        # Save directly to PDF: no temp PNG round-trip through disk
         result_path = os.path.join(app.config['UPLOAD_FOLDER'], 'result.pdf')
-        img = Image.open(temp_png)
-        if img.mode != 'RGB':
-            img = img.convert('RGB')
-        img.save(result_path, 'PDF', resolution=dpi)
-        
-        # Clean up temporary PNG file
-        try:
-            os.remove(temp_png)
-        except:
-            pass
+        mosaic.save(result_path, 'PDF', resolution=dpi)
     else:
         result_path = os.path.join(app.config['UPLOAD_FOLDER'], 'result.jpg')
-        if mosaic.mode == 'RGBA':
-            # Add a white background below the RGBA image
-            background = Image.new('RGB', mosaic.size, (255, 255, 255))
-            background.paste(mosaic, mask=mosaic.split()[3])  # Use alpha channel as mask
-            mosaic = background
         mosaic.save(result_path, 'JPEG', quality=95, dpi=(dpi, dpi))
     return result_path
 
